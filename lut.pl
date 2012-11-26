@@ -170,7 +170,7 @@ helper add => sub {
 	my $dn = shift;
 	my $attrs = shift;
 	return ('err','Error!') unless $dn && ref $attrs eq 'ARRAY';
-warn Dumper($dn, $attrs);
+warn Dumper($dn, {attrs=>$attrs});
 return 0?('err','Error!'):('ok','All good!');
 #	$_ = $self->ldap->add($dn, attrs=>$attrs);
 #	return $_->is_error?'err':'ok', $_->error;
@@ -180,7 +180,7 @@ helper rename => sub {
 	my $dn = shift;
 	my $newrdn = shift;
 	return ('err','Error!') unless $dn && $newrdn;
-warn Dumper($dn, $newrdn);
+warn Dumper($dn, {deleteoldrdn=>1, newrdn=>$newrdn});
 return 0?('err','Error!'):('ok','All good!');
 #	$_ = $self->ldap->moddn($dn, deleteoldrdn=>1, newrdn=>$newrdn);
 #	return $_->is_error?'err':'ok', $_->error;
@@ -190,7 +190,7 @@ helper move => sub {
 	my $dn = shift;
 	my $newlocation = shift;
 	return ('err','Error!') unless $dn && $newlocation;
-warn Dumper($dn, $newlocation);
+warn Dumper($dn, {newsuperior=>$newlocation});
 return 0?('err','Error!'):('ok','All good!');
 #	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation);
 #	return $_->is_error?'err':'ok', $_->error;
@@ -261,20 +261,18 @@ post '/addou' => (is_xhr=>1) => sub {
 };
 post '/resetdir' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my $uid = shift;
+	my $uid = $self->param('uid');
 	return $self->render_json({response=>'err',message=>'Error!'}) unless $uid;
 	warn "Resetting User $uid\n";
 	my ($res, $msg);
 	my $user = $self->find($uid);
-	system "sudo", "mkdir", "-p", $user->get_value('homeDirectory');
-	system "sudo", "chmod", "0700", $user->get_value('homeDirectory');
-	system "sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gid'), $user->get_value('homeDirectory');
-	if ( $? == -1 ) {
-		($res, $msg) = ('err', 'Failed to resetdir');
-	} else {
-		my $err = $? >> 8;
-		($res, $msg) = $err ? ('err', 'resetdir error: '.$!) : ('ok','All good!');
-	}
+	my @system = ();
+	push @system, _system("sudo", "mv", $user->get_value('homeDirectory'), $self->param('homeDirectory')) if $user->get_value('homeDirectory') ne $self->param('homeDirectory') && -e $user->get_value('homeDirectory') && ! -e $self->param('homeDirectory');
+	push @system, _system("sudo", "mkdir", "-p", $user->get_value('homeDirectory'));
+	push @system, _system("sudo", "chmod", "0700", $user->get_value('homeDirectory'));
+	push @system, _system("sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gid'), $user->get_value('homeDirectory'));
+	$msg = join ',', grep { !undef } @system;
+	($res, $msg) = $msg ? ('err', $msg) : ('ok', 'All good!');
 	$self->render_json({response=>$res,message=>$msg});
 };
 post '/update' => (is_xhr=>1) => sub {
@@ -284,6 +282,7 @@ post '/update' => (is_xhr=>1) => sub {
             ($res, $msg) = $self->rename($self->param('dn'), "uid=".$self->param('newuid'));
 	} elsif ( $self->param('newlocation') ne $self->param('location') ) {
             ($res, $msg) = $self->move($self->param('dn'), $self->param('newlocation'));
+	} elsif ( $self->param('newhomeDirectory') ne $self->param('homeDirectory') ) {
 	} else {
             ($res, $msg) = $self->replace($self->param('dn'),
                     gecos => $self->param('gecos'),
@@ -325,13 +324,10 @@ get '/gads' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($res, $msg);
 	warn "Executing GADS\n";
-	system "touch", "/tmp/gads";
-	if ( $? == -1 ) {
-		($res, $msg) = ('err', 'Failed to execute GADS');
-	} else {
-		my $err = $? >> 8;
-		($res, $msg) = $err ? ('err', 'GADS error: '.$!) : ('ok','All good!');
-	}
+	my @system = ();
+	push @system, _system("touch", "/tmp/gads");
+	$msg = join ',', grep { !undef } @system;
+	($res, $msg) = $msg ? ('err', $msg) : ('ok', 'All good!');
 	$self->render_json({response=>$res,message=>$msg});
 };
 get '/backup' => sub {
@@ -350,6 +346,17 @@ get '/backup' => sub {
 };
 
 app->start;
+
+sub _system {
+	my @system = @_;
+	warn join(' ', @system), "\n";
+	system @system;
+	if ( $? == -1 ) {
+		return 'Failed to execute @system';
+	} else {
+		return $? >> 8 ? $! : undef;
+	}
+}
 
 __DATA__
 @@ logout.html.ep
@@ -429,7 +436,7 @@ $(document).ready(function(){
             return false;
         });
         $("#resetdir").click(function(){
-            $.post("<%= url_for 'resetdir' %>", {uid: $("#form input[name=uid]").val()}, function(data){
+            $.post("<%= url_for 'resetdir' %>", {uid: $("#form input[name=uid]").val(), homeDirectory: $("#form input[name=homeDirectory]").val()}, function(data){
                 console.log(data);
                 if ( data.response == "ok" ) {
                     $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
