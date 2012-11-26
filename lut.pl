@@ -269,8 +269,8 @@ post '/resetdir' => (is_xhr=>1) => sub {
 	my @system = ();
 	push @system, _system("sudo", "mv", $user->get_value('homeDirectory'), $self->param('homeDirectory')) if $user->get_value('homeDirectory') ne $self->param('homeDirectory') && -e $user->get_value('homeDirectory') && ! -e $self->param('homeDirectory');
 	push @system, _system("sudo", "mkdir", "-p", $user->get_value('homeDirectory'));
-	push @system, _system("sudo", "chmod", "0700", $user->get_value('homeDirectory'));
-	push @system, _system("sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gid'), $user->get_value('homeDirectory'));
+	push @system, _system("sudo", "chmod", "0700", $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
+	push @system, _system("sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gidNumber'), $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
 	$msg = join ',', grep { !undef } @system;
 	($res, $msg) = $msg ? ('err', $msg) : ('ok', 'All good!');
 	$self->render_json({response=>$res,message=>$msg});
@@ -282,7 +282,6 @@ post '/update' => (is_xhr=>1) => sub {
             ($res, $msg) = $self->rename($self->param('dn'), "uid=".$self->param('newuid'));
 	} elsif ( $self->param('newlocation') ne $self->param('location') ) {
             ($res, $msg) = $self->move($self->param('dn'), $self->param('newlocation'));
-	} elsif ( $self->param('newhomeDirectory') ne $self->param('homeDirectory') ) {
 	} else {
             ($res, $msg) = $self->replace($self->param('dn'),
                     gecos => $self->param('gecos'),
@@ -350,11 +349,12 @@ app->start;
 sub _system {
 	my @system = @_;
 	warn join(' ', @system), "\n";
-	system @system;
+#	system @system;
+system "date";
 	if ( $? == -1 ) {
 		return 'Failed to execute @system';
 	} else {
-		return $? >> 8 ? $! : undef;
+		return $? >> 8 ? $! : '';
 	}
 }
 
@@ -623,13 +623,13 @@ $(document).ready(function(){
     <input type="hidden" name="location" value="{$T.location}" id="location">
     <input type="hidden" name="uid" value="{$T.uid}" id="uid">
     <table>
-    <tr><td>OU</td><td><%= select_field newlocation => [$self->ous], id => 'newlocation' %> <img src="/plus.png" id="addou" class="link"></td></tr>
+    <tr><td>OU</td><td><%= select_field newlocation => [$self->ous], id => 'newlocation' %> <img src="/plus.png" id="addou" class="link" height=12 width=12></td></tr>
     <tr><td>Name</td><td><input type="text" name="gecos" value="{$T.gecos}" id="gecos"></td></tr>
     <tr><td>First Name</td><td><input type="text" name="givenName" value="{$T.givenName}" id="givenName"></td></tr>
     <tr><td>Last Name</td><td><input type="text" name="sn" value="{$T.sn}" id="sn"></td></tr>
     <tr><td>Username</td><td><input type="text" name="newuid" value="{$T.uid}" id="newuid"></td></tr>
     <tr><td>Password</td><td><input type="text" name="userPassword" value="{$T.userPassword}" id="userPassword"></td></tr>
-    <tr><td>Home Directory</td><td><input type="text" name="homeDirectory" value="{$T.homeDirectory}" id="homeDirectory"> <img src="/reset.png" id="resetdir" class="link" height=16 width=20></td></tr>
+    <tr><td>Home Directory</td><td><input type="text" name="homeDirectory" value="{$T.homeDirectory}" id="homeDirectory"> <img src="/reset.png" id="resetdir" class="link" height=12 width=16></td></tr>
     <tr><td>Account Status</td><td><input type="text" name="accountStatus" value="{$T.accountStatus}"></td></tr>
     <tr><td>E-mail Address</td><td><input type="text" name="mail" value="{$T.mail}" id="mail"></td></tr>
     <tr><td>Login Shell</td><td><input type="text" name="loginShell" value="{$T.loginShell}"></td></tr>
