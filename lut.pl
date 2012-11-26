@@ -104,6 +104,29 @@ plugin 'authorization', {
 };
 
 helper ldap => sub { return $ldap };
+helper find => sub {
+	my $self = shift;
+	my $uid = shift;
+	return undef unless $uid;
+        $_ = $self->ldap->search(
+                base=>$self->config->{ldapbase},
+                filter => "(&(uid=$uid)(objectClass=posixAccount))",
+        );
+        $_->code and return undef;
+	return $_->entry(0);
+};
+helper search => sub {
+	my $self = shift;
+	my $q = shift;
+	return () unless $q;
+        $_ = $self->ldap->search(
+                base=>$self->config->{ldapbase},
+                filter => "(&(objectClass=person)(|(uid=$q*)(sn=$q*)(givenName=$q*)))",
+        );
+        return () if $_->is_error;
+        return () unless $_->entries;
+        return map { {label=>($_->get_value('gecos')||join(' ', $_->get_value('givenName')||'',$_->get_value('sn')||'')).' ('.$_->get_value('uid').')',value=>$_->get_value('uid')} } grep { $_->get_value('uid') } $_->entries;
+};
 helper ous => sub {
 	my $self = shift;
         my $search = $self->ldap->search(
@@ -115,31 +138,59 @@ helper ous => sub {
 	my @ous = ();
 	foreach ( $search->entries ) {
 		next unless $_->dn && $_->get_value('description');
-		push @ous, [$_->get_value('description') => $_->dn];
+		push @ous, [$_->get_value('description') => lc($_->dn)];
 	}
 	return sort { $a->[0] cmp $b->[0] } @ous;
 };
 helper replace => sub {
 	my $self = shift;
 	my $dn = shift;
+	return ('err','Error!') unless $dn;
 	%_ = (@_);
-	%_ = (map { $_ => $_{$_} } grep { /Password$/ } keys %_) unless $self->has_priv('Domain Admins');
-	$_{sambaLMPassword} = lmhash($_{userPassword}) if $_{userPassword};
-	$_{sambaNTPassword} = nthash($_{userPassword}) if $_{userPassword};
-warn Dumper({%_});
+	($_{sambaLMPassword}, $_{sambaNTPassword}) = (lmhash($_{userPassword}), nthash($_{userPassword})) if $_{userPassword};
+warn Dumper($dn, {%_});
 return 0?('err','Error!'):('ok','All good!');
-#	my $modify = $self->ldap->modify($dn, replace => {%_});
-#	return $modify->is_error?'err':'ok', $modify->error;
+#	$_ = $self->ldap->modify($dn, replace => {%_});
+#	return $_->is_error?'err':'ok', $_->error;
 };
-helper find => sub {
+helper delete => sub {
 	my $self = shift;
-	return undef unless $_[0];
-        my $search = $self->ldap->search(
-                base=>$self->config->{ldapbase},
-                filter => "(&(uid=$_[0])(objectClass=posixAccount))",
-        );
-        $search->code and do { warn $search->error; return undef; };
-	return $search->entry(0);
+	my $dn = shift;
+	return ('err','Error!') unless $dn;
+warn Dumper($dn);
+return 0?('err','Error!'):('ok','All good!');
+#	$_ = $self->ldap->delete($dn);
+#	return $_->is_error?'err':'ok', $_->error;
+};
+helper add => sub {
+	my $self = shift;
+	my $dn = shift;
+	my $attrs = shift;
+	return ('err','Error!') unless $dn && ref $attrs eq 'ARRAY';
+warn Dumper($dn, $attrs);
+return 0?('err','Error!'):('ok','All good!');
+#	$_ = $self->ldap->add($dn, attrs=>$attrs);
+#	return $_->is_error?'err':'ok', $_->error;
+};
+helper rename => sub {
+	my $self = shift;
+	my $dn = shift;
+	my $newrdn = shift;
+	return ('err','Error!') unless $dn && $newrdn;
+warn Dumper($dn, $newrdn);
+return 0?('err','Error!'):('ok','All good!');
+#	$_ = $self->ldap->moddn($dn, deleteoldrdn=>1, newrdn=>$newrdn);
+#	return $_->is_error?'err':'ok', $_->error;
+};
+helper move => sub {
+	my $self = shift;
+	my $dn = shift;
+	my $newlocation = shift;
+	return ('err','Error!') unless $dn && $newlocation;
+warn Dumper($dn, $newlocation);
+return 0?('err','Error!'):('ok','All good!');
+#	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation);
+#	return $_->is_error?'err':'ok', $_->error;
 };
 
 get '/' => sub {
@@ -161,58 +212,113 @@ any '/login' => sub {
 } => 'login';
 get '/logout' => (authenticated => 1) => 'logout';
 
-get '/ous' => (is_xhr=>1) => sub {
-	my $self = shift;
-	$self->render_json([$self->ous]);
-};
-
 post '/details' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $details = $self->role eq 'admin' ? $self->find($self->param('details')) || $self->current_user : $self->current_user;
-	my $sup = $details->dn;
-	$sup =~ s/^[^,]+,//;
+	my $location = $details->dn;
+	$location =~ s/^[^,]+,//;
 	$self->render_json({
-		dn => $details->dn,
-		superior => $sup,
-		gecos => $details->get_value('gecos'),
-		givenName => $details->get_value('givenName'),
-		sn => $details->get_value('sn'),
-		uid => $details->get_value('uid'),
-		userPassword => $details->get_value('userPassword'),
-		homeDirectory => $details->get_value('homeDirectory'),
-		accountStatus => $details->get_value('accountStatus'),
-		mail => $details->get_value('mail'),
-		loginShell => $details->get_value('loginShell'),
-		description => $details->get_value('description'),
+		dn => lc($details->dn)||'',
+		location => lc($location)||'',
+		gecos => $details->get_value('gecos')||'',
+		givenName => $details->get_value('givenName')||'',
+		sn => $details->get_value('sn')||'',
+		uid => $details->get_value('uid')||'',
+		userPassword => $details->get_value('userPassword')||'',
+		homeDirectory => $details->get_value('homeDirectory')||'',
+		accountStatus => $details->get_value('accountStatus')||'',
+		mail => $details->get_value('mail')||'',
+		loginShell => $details->get_value('loginShell')||'',
+		description => $details->get_value('description')||'',
 	});
 };
 
 under '/home' => (authenticated => 1);
 get '/' => {template=>'home', view=>'user'};
-post '/' => (is_xhr=>1) => sub {
+post '/changepassword' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my ($res, $msg) = $self->replace(map { s/^o_//; $_ => $self->param($_) } grep { /^o_/ } $self->param);
+	my ($res, $msg) = $self->replace($self->param('dn'),
+		userPassword => $self->param('userPassword'),
+	);
 	$self->render_json({response=>$res,message=>$msg});
 };
 
 under '/home/admin' => (authenticated => 1, has_priv => 'Domain Admins');
 get '/' => {template=>'home',view=>'admin'};
-post '/' => (is_xhr=>1) => sub {
-	my $self = shift;
-	my ($res, $msg) = $self->replace(map { s/^o_//; $_ => $self->param($_) } grep { /^o_/ } $self->param);
-	$self->render_json({response=>$res,message=>$msg});
-};
 get '/search' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my $q = $self->param('term');
-	my $search = $self->ldap->search(
-		base=>$self->config->{ldapbase},
-		filter => "(&(objectClass=person)(|(uid=$q*)(sn=$q*)(givenName=$q*)))",
+	$self->render_json([$self->search($self->param('term'))]);
+};
+post '/addou' => (is_xhr=>1) => sub {
+	my $self = shift;
+	my ($location, $ou, $description) = ($self->param('location'), $self->param('ou'), $self->param('description'));
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $location && $ou && $description;
+	my ($res, $msg) = $self->add("ou=$ou,$location", [objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description]);
+	$self->render_json({response=>$res,message=>$msg});
+};
+post '/resetdir' => (is_xhr=>1) => sub {
+	my $self = shift;
+	my $uid = shift;
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $uid;
+	warn "Resetting User $uid\n";
+	my ($res, $msg) = 0?('err','Error!'):('ok','All good!');
+	$self->render_json({response=>$res,message=>$msg});
+};
+post '/update' => (is_xhr=>1) => sub {
+	my $self = shift;
+	my ($res, $msg);
+	if ( $self->param('newuid') ne $self->param('uid') ) {
+            ($res, $msg) = $self->rename($self->param('dn'), "uid=".$self->param('newuid'));
+	} elsif ( $self->param('newlocation') ne $self->param('location') ) {
+            ($res, $msg) = $self->move($self->param('dn'), $self->param('newlocation'));
+	} else {
+            ($res, $msg) = $self->replace($self->param('dn'),
+                    gecos => $self->param('gecos'),
+                    givenName => $self->param('givenName'),
+                    sn => $self->param('sn'),
+                    uid => $self->param('uid'),
+                    userPassword => $self->param('userPassword'),
+                    homeDirectory => $self->param('homeDirectory'),
+                    accountStatus => $self->param('accountStatus'),
+                    mail => $self->param('mail'),
+                    loginShell => $self->param('loginShell'),
+                    description => $self->param('description'),
+            );
+	}
+	$self->render_json({response=>$res,message=>$msg});
+};
+post '/remove' => (is_xhr=>1) => sub {
+	my $self = shift;
+	my ($res, $msg) = $self->delete($self->param('dn'));
+	$self->render_json({response=>$res,message=>$msg});
+};
+post '/copy' => (is_xhr=>1) => sub {
+	my $self = shift;
+	my ($res, $msg) = $self->add($self->param('dn'),
+		gecos => $self->param('gecos'),
+		givenName => $self->param('givenName'),
+		sn => $self->param('sn'),
+		uid => $self->param('uid'),
+		userPassword => $self->param('userPassword'),
+		homeDirectory => $self->param('homeDirectory'),
+		accountStatus => $self->param('accountStatus'),
+		mail => $self->param('mail'),
+		loginShell => $self->param('loginShell'),
+		description => $self->param('description'),
 	);
-	return (success=>'err',message=>$search->error) if $search->is_error;
-	return $self->render_json([]) unless $search->entries;
-	my @ac = map { {label=>$search->entry($_)->get_value('gecos').' ('.$search->entry($_)->get_value('uid').')',value=>$search->entry($_)->get_value('uid')} } 0..$search->entries-1;
-	return $self->render_json([@ac]);
+	$self->render_json({response=>$res,message=>$msg});
+};
+get '/gads' => (is_xhr=>1) => sub {
+	my $self = shift;
+	warn "Executing GADS\n";
+	my ($res, $msg) = 0?('err','Error!'):('ok','All good!');
+	$self->render_json({response=>$res,message=>$msg});
+};
+get '/backup' => (is_xhr=>1) => sub {
+	my $self = shift;
+	warn "Making backup\n";
+	my ($res, $msg) = 0?('err','Error!'):('ok','All good!');
+	$self->render_json({response=>$res,message=>$msg});
 };
 
 app->start;
@@ -241,6 +347,9 @@ Password: <%= password_field 'password' %><br />
 <style>
     * {font-family:verdana; font-size:12px;}
     .link {font-size:10px;text-decoration:underline;color:blue;cursor:pointer;}
+    div.modal,div.msg {display:none;}
+    .err {color:red;}
+    .ok {color:green;}
 </style>
 <link   href="http://ajax.googleapis.com/ajax/libs/jqueryui/1.8/themes/base/jquery-ui.css" type="text/css" rel="stylesheet" media="all" />
 <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.8/jquery.min.js" type="text/javascript"></script>
@@ -248,116 +357,157 @@ Password: <%= password_field 'password' %><br />
 <script src="http://jtemplates.tpython.com/jTemplates/jquery-jtemplates.js" type="text/javascript"></script>
 <script type="text/javascript">
 $(document).ready(function(){
-    function update () {
-    $("#update").submit(function(event){
-        event.preventDefault();
-        if ( "<%= $view %>" == 'user' ) {
-            var u1 = $("#form").find('input[name=o_userPassword]').val();
-            var u2 = $("#form").find('input[name=userPassword2]').val();
-        }
-        if ( u1 != u2 ) {
-            $("#msg").addClass('err').removeClass('ok').html("Passwords do not match!");
-            return false;
-        }
-        $.post("<%= url_for %>", $("#form").serialize(), function(data){
+    $("#gads").click(function(){
+        $.get("<%= url_for 'gads' %>", null, function(data){
             console.log(data);
             if ( data.response == "ok" ) {
-                $("#msg").addClass('ok').removeClass('err').html(data.message);
+                $("#admin-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
             } else {
-                $("#msg").addClass('err').removeClass('ok').html(data.message);
+                $("#admin-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
             }
         });
-        return false;
     });
-    }
-    function remove () {
-    $("#remove").submit(function(event){
-        event.preventDefault();
-        if ( "<%= $view %>" == 'user' ) {
-            var u1 = $("#form").find('input[name=o_userPassword]').val();
-            var u2 = $("#form").find('input[name=userPassword2]').val();
-        }
-        if ( u1 != u2 ) {
-            $("#msg").addClass('err').removeClass('ok').html("Passwords do not match!");
-            return false;
-        }
-        $.post("<%= url_for %>", $("#form").serialize(), function(data){
+    $("#backup").click(function(){
+        $.get("<%= url_for 'backup' %>", null, function(data){
             console.log(data);
             if ( data.response == "ok" ) {
-                $("#msg").addClass('ok').removeClass('err').html(data.message);
+                $("#admin-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
             } else {
-                $("#msg").addClass('err').removeClass('ok').html(data.message);
+                $("#admin-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
             }
         });
-        return false;
     });
-    }
-    function copy () {
-    $("#copy").submit(function(event){
-        event.preventDefault();
-        if ( "<%= $view %>" == 'user' ) {
-            var u1 = $("#form").find('input[name=o_userPassword]').val();
+
+    function bind_buttons () {
+        $("#newlocation").val($("#location").val()); // Select OU in form
+        $("#addou-location").val("ou=people,o=local"); // Select Location in Add OU form
+        $("#search").val("");
+        $("#changepassword").click(function(){
+            var u1 = $("#form").find('input[name=userPassword]').val();
             var u2 = $("#form").find('input[name=userPassword2]').val();
-        }
-        if ( u1 != u2 ) {
-            $("#msg").addClass('err').removeClass('ok').html("Passwords do not match!");
-            return false;
-        }
-        $.post("<%= url_for %>", $("#form").serialize(), function(data){
-            console.log(data);
-            if ( data.response == "ok" ) {
-                $("#msg").addClass('ok').removeClass('err').html(data.message);
-            } else {
-                $("#msg").addClass('err').removeClass('ok').html(data.message);
+            if ( u1 != u2 ) {
+                $("#user-msg").addClass('err').removeClass('ok').html("Passwords do not match!");
+                return false;
             }
-        });
-        return false;
-    });
-    }
-    function resetdir () {
-    $("#resetdir").submit(function(event){
-        event.preventDefault();
-        if ( "<%= $view %>" == 'user' ) {
-            var u1 = $("#form").find('input[name=o_userPassword]').val();
-            var u2 = $("#form").find('input[name=userPassword2]').val();
-        }
-        if ( u1 != u2 ) {
-            $("#msg").addClass('err').removeClass('ok').html("Passwords do not match!");
+            $.post("<%= url_for 'changepassword' %>", $("#form").serialize(), function(data){
+                console.log(data);
+                if ( data.response == "ok" ) {
+                    $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                } else {
+                    $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                }
+            });
             return false;
-        }
-        $.post("<%= url_for %>", $("#form").serialize(), function(data){
-            console.log(data);
-            if ( data.response == "ok" ) {
-                $("#msg").addClass('ok').removeClass('err').html(data.message);
-            } else {
-                $("#msg").addClass('err').removeClass('ok').html(data.message);
-            }
         });
-        return false;
-    });
-    }
-    function addou () {
-    $("#addou").submit(function(event){
-        event.preventDefault();
-        if ( "<%= $view %>" == 'user' ) {
-            var u1 = $("#form").find('input[name=o_userPassword]').val();
-            var u2 = $("#form").find('input[name=userPassword2]').val();
-        }
-        if ( u1 != u2 ) {
-            $("#msg").addClass('err').removeClass('ok').html("Passwords do not match!");
+        $("#resetdir").click(function(){
+            $.post("<%= url_for 'resetdir' %>", {uid: $("#form input[name=uid]").val()}, function(data){
+                console.log(data);
+                if ( data.response == "ok" ) {
+                    $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                } else {
+                    $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                }
+            });
+        });
+        $("#update").click(function(){
+            $.post("<%= url_for 'update' %>", $("#form").serialize(), function(data){
+                console.log(data);
+                if ( data.response == "ok" ) {
+                    $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                } else {
+                    $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                }
+            });
             return false;
-        }
-        $.post("<%= url_for %>", $("#form").serialize(), function(data){
-            console.log(data);
-            if ( data.response == "ok" ) {
-                $("#msg").addClass('ok').removeClass('err').html(data.message);
-            } else {
-                $("#msg").addClass('err').removeClass('ok').html(data.message);
-            }
         });
-        return false;
-    });
+        $("#remove").click(function(){
+            $.post("<%= url_for 'remove' %>", $("#form").serialize(), function(data){
+                console.log(data);
+                if ( data.response == "ok" ) {
+                    $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                } else {
+                    $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                }
+            });
+            return false;
+        });
+        $("#copy").attr('disabled', 'disabled').click(function(){
+            $("#dialog-copy").dialog({
+                autoOpen: false,
+                height: 320,
+                width: 380,
+                modal: true,
+                buttons: {
+                    "Create New User": function() {
+                        var copy = $(this);
+                        if ( $("#copy-givenName").val() == "" ) {
+                            $("#copy-msg").addClass('err').removeClass('ok').html("Missing First Name").show().delay(2500).fadeOut();
+                        } else if ( $("#copy-sn").val() == "" ) {
+                            $("#copy-msg").addClass('err').removeClass('ok').html("Missing Last Name").show().delay(2500).fadeOut();
+                        } else if ( $("#copy-uid").val() == "" ) {
+                            $("#copy-msg").addClass('err').removeClass('ok').html("Missing Username").show().delay(2500).fadeOut();
+                        } else if ( $("#copy-userPassword").val() == "" ) {
+                            $("#copy-msg").addClass('err').removeClass('ok').html("Missing Password").show().delay(2500).fadeOut();
+                        } else {
+                            $("#dn").val($("#dn").val().replace($("#uid").val(), $("#copy-uid").val()));
+                            $("#homeDirectory").val($("#homeDirectory").val().replace($("#uid").val(), $("#copy-uid").val()));
+                            $("#mail").val($("#mail").val().replace($("#uid").val(), $("#copy-uid").val()));
+                            $("#newuid").val($("#copy-uid").val());
+                            $("#uid").val($("#copy-uid").val());
+                            copy.dialog("close");
+                            $.post("<%= url_for 'update' %>", $("#form").serialize(), function(data){
+                                console.log(data);
+                                if ( data.response == "ok" ) {
+                                    $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                                } else {
+                                    $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                                }
+                            });
+                        }
+                    },
+                    Cancel: function() {
+                        $(this).dialog("close");
+                    }
+                },
+            });
+            $("#dialog-copy").dialog("open");
+        });
+        $("#addou").click(function(){
+            $("#dialog-addou").dialog({
+                autoOpen: false,
+                height: 320,
+                width: 380,
+                modal: true,
+                buttons: {
+                    "Add OU": function() {
+                        var addou = $(this);
+                        if ( $("#addou-location").val() == "" ) {
+                            $("#addou-msg").addClass('err').removeClass('ok').html("Missing Location").show().delay(2500).fadeOut();
+                        } else if ( $("#addou-ou").val() == "" ) {
+                            $("#addou-msg").addClass('err').removeClass('ok').html("Missing OU").show().delay(2500).fadeOut();
+                        } else if ( $("#addou-description").val() == "" ) {
+                            $("#addou-msg").addClass('err').removeClass('ok').html("Missing Description").show().delay(2500).fadeOut();
+                        } else {
+                            $.post("<%= url_for 'addou' %>", {location: $("#addou-location").val(), ou: $("#addou-ou").val(), description: $("#addou-description").val()}, function(data){
+                                console.log(data);
+                                if ( data.response == "ok" ) {
+                                    $("#addou-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                                    addou.dialog("close");
+                                } else {
+                                    $("#addou-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
+                                }
+                            });
+                        }
+                    },
+                    Cancel: function() {
+                        $(this).dialog("close");
+                    }
+                },
+            });
+            $("#dialog-addou").dialog("open");
+        });
     }
+
     $("#details").setTemplateElement("t_details", null, {runnable_functions: true});
     $("#search").autocomplete({
         source: "<%= url_for 'search' %>",
@@ -369,7 +519,7 @@ $(document).ready(function(){
                     headers: { 
                             Accept : "application/json; charset=utf-8"
                     },
-                    on_success: update
+                    on_success: bind_buttons
             });
         }
     });
@@ -378,7 +528,7 @@ $(document).ready(function(){
             headers: { 
                     Accept : "application/json; charset=utf-8"
             },
-            on_success: update
+            on_success: bind_buttons
     });
 });
 </script>
@@ -386,39 +536,67 @@ $(document).ready(function(){
 <body>
 %= link_to Logout => 'logout'
 <br />
-% if ( $view eq 'admin' && $self->has_priv('Domain Admins') ) {
+% if ( $view eq 'admin' ) {
     %= link_to User => '/home'
     <hr />
     Search: <%= text_field 'search', id=>'search' %>
     <hr />
-% } elsif ( $self->has_priv('Domain Admins') ) {
+% } else {
     %= link_to Admin => '/home/admin'
 % }
 <div id="details" class="jTemplatesTest"></div>
+% if ( $view eq 'admin' ) {
+    <hr />
+    <button id="gads">Google Sync</button> <button id="backup">Download Backup</button>
+    <div id="admin-msg" class="msg">
+% }
 <textarea id="t_details" style="display:none">
 %= include $view
 </textarea>
+<div id="dialog-addou" title="New OU" class="modal">
+        <form id="addou-form">
+        <table>
+        <tr><td>Location</td><td><%= select_field location => [$self->ous], id => 'addou-location' %></td></tr>
+        <tr><td>OU</td><td><input id="addou-ou" type='text' name='dn' maxlength='60'></td></tr>
+        <tr><td>Description</td><td><input id="addou-description" type='text' name='description' maxlength='60'></td></tr>
+        <tr><td colspan="2"><div id="addou-msg" class="msg"></div></td></tr>
+        </table>
+        </form>
+</div>  
+<div id="dialog-copy" title="Copy User" class="modal">
+        <form id="copy-form">
+        <table>
+        <tr><td>First Name</td><td><input id="copy-givenName" type='text' name='givenName' maxlength='60'></td></tr>
+        <tr><td>Last Name</td><td><input id="copy-sn" type='text' name='sn' maxlength='60'></td></tr>
+        <tr><td>Username</td><td><input id="copy-uid" type='text' name='uid' maxlength='60'></td></tr>
+        <tr><td>Password</td><td><input id="copy-userPassword" type='text' name='userPassword' maxlength='60'></td></tr>
+        <tr><td colspan="2"><div id="copy-msg" class="msg"></div></td></tr>
+        </table>
+        </form>
+</div>  
+
 </body>
 </html>
 
 @@ admin.html.ep
     <form id="form">
-    <input type="hidden" name="dn" value="{$T.dn}">
-    <input type="hidden" name="superior" value="{$T.superior}">
+    <input type="hidden" name="dn" value="{$T.dn}" id="dn">
+    <input type="hidden" name="location" value="{$T.location}" id="location">
+    <input type="hidden" name="uid" value="{$T.uid}" id="uid">
     <table>
-    <tr><td>OU</td><td><%= select_field newsup => [$self->ous] %> <img src="/plus.png" id="addou"></td></tr>
-    <tr><td>Name</td><td><input type="text" name="name" value="{$T.gecos}"></td></tr>
-    <tr><td>First Name</td><td><input type="text" name="o_givenName" value="{$T.givenName}"></td></tr>
-    <tr><td>Last Name</td><td><input type="text" name="o_sn" value="{$T.sn}"></td></tr>
-    <tr><td>Username</td><td><input type="text" name="o_uid" value="{$T.uid}"></td></tr>
-    <tr><td>Password</td><td><input type="text" name="o_userPassword" value="{$T.userPassword}"></td></tr>
-    <tr><td>Home Directory</td><td><input type="text" name="o_homeDirectory" value="{$T.homeDirectory}"> <img src="/reset.png" id="resetdir" height=16 width=20></td></tr>
-    <tr><td>Account Status</td><td><input type="text" name="o_accountStatus" value="{$T.accountStatus}"></td></tr>
-    <tr><td>E-mail Address</td><td><input type="text" name="o_mail" value="{$T.mail}"></td></tr>
-    <tr><td>Login Shell</td><td><input type="text" name="o_loginShell" value="{$T.loginShell}"></td></tr>
-    <tr><td>Description</td><td><input type="text" name="o_description" value="{$T.description}"></td></tr>
-    <tr><td colspan=2><%= submit_button 'Update', id=>'update' %> <%= submit_button 'Remove', id=>'remove' %> <%= submit_button 'Copy', id=>"copy" %></td></tr>
-    <tr><td colspan=2><div id="msg"></div></td></tr>
+    <tr><td>OU</td><td><%= select_field newlocation => [$self->ous], id => 'newlocation' %> <img src="/plus.png" id="addou" class="link"></td></tr>
+    <tr><td>Name</td><td><input type="text" name="gecos" value="{$T.gecos}" id="gecos"></td></tr>
+    <tr><td>First Name</td><td><input type="text" name="givenName" value="{$T.givenName}" id="givenName"></td></tr>
+    <tr><td>Last Name</td><td><input type="text" name="sn" value="{$T.sn}" id="sn"></td></tr>
+    <tr><td>Username</td><td><input type="text" name="newuid" value="{$T.uid}" id="newuid"></td></tr>
+    <tr><td>Password</td><td><input type="text" name="userPassword" value="{$T.userPassword}" id="userPassword"></td></tr>
+    <tr><td>Home Directory</td><td><input type="text" name="homeDirectory" value="{$T.homeDirectory}" id="homeDirectory"> <img src="/reset.png" id="resetdir" class="link" height=16 width=20></td></tr>
+    <tr><td>Account Status</td><td><input type="text" name="accountStatus" value="{$T.accountStatus}"></td></tr>
+    <tr><td>E-mail Address</td><td><input type="text" name="mail" value="{$T.mail}" id="mail"></td></tr>
+    <tr><td>Login Shell</td><td><input type="text" name="loginShell" value="{$T.loginShell}"></td></tr>
+    <tr><td>Description</td><td><input type="text" name="description" value="{$T.description}"></td></tr>
+    <tr><td colspan=2><button id="update">Update</button> <button id="remove">Remove</button> <button id="copy">Copy</button></td></tr>
+    <tr><td colspan=2><div id="user-msg" class="msg"></div></td></tr>
     </table>
     </form>
 
@@ -428,9 +606,9 @@ $(document).ready(function(){
     <tr><td>Name</td><td>{$T.gecos}</td></tr>
     <tr><td>E-mail Address</td><td>{$T.mail}</td></tr>
     <tr><td>Account Status</td><td>{$T.accountStatus}</td></tr>
-    <tr><td style="vertical-align:top">Password</td><td><%= password_field 'o_userPassword' %><br /><%= password_field 'userPassword2' %></td></tr>
-    <tr><td colspan=2><%= submit_button 'Update' %></td></tr>
-    <tr><td colspan=2><div id="msg"></div></td></tr>
+    <tr><td style="vertical-align:top">Password</td><td><%= password_field 'userPassword' %><br /><%= password_field 'userPassword2' %></td></tr>
+    <tr><td colspan=2><button id="changepassword">Change Password</button></td></tr>
+    <tr><td colspan=2><div id="user-msg" class="msg"></div></td></tr>
     </table>
     </form>
 
