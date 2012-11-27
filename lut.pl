@@ -250,6 +250,7 @@ under '/home/admin' => (authenticated => 1, has_priv => 'Domain Admins');
 get '/' => {template=>'home',view=>'admin'};
 get '/search' => (is_xhr=>1) => sub {
 	my $self = shift;
+warn Dumper($self->param('term'));
 	$self->render_json([$self->search($self->param('term'))]);
 };
 post '/addou' => (is_xhr=>1) => sub {
@@ -359,21 +360,6 @@ system "date";
 }
 
 __DATA__
-@@ logout.html.ep
-% $self->logout;
-Not logged in.<br />
-%= link_to Login => 'login'
-
-@@ login.html.ep
-% if ( stash 'denied' ) {
-    Access Denied<br />
-% }
-%= form_for '/login' => (method=>'POST') => begin
-Username: <%= text_field 'username' %><br />
-Password: <%= password_field 'password' %><br />
-%= submit_button 'login', name=>'Login'
-% end
-
 @@ home.html.ep
 <!doctype html>
 <html>
@@ -650,6 +636,26 @@ $(document).ready(function(){
     <tr><td colspan=2><div id="user-msg" class="msg"></div></td></tr>
     </table>
     </form>
+
+@@ not_found.html.ep
+The page you are looking for cannot be found.  Perhaps you need to login?
+<hr />
+%= include 'login'
+
+@@ logout.html.ep
+% $self->logout;
+Not logged in.<br />
+%= link_to Login => 'login'
+
+@@ login.html.ep
+% if ( stash 'denied' ) {
+    Access Denied<br />
+% }
+%= form_for '/login' => (method=>'POST') => begin
+Username: <%= text_field 'username' %><br />
+Password: <%= password_field 'password' %><br />
+%= submit_button 'login', name=>'Login'
+% end
 
 @@ plus.png (base64)
 /9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwM
