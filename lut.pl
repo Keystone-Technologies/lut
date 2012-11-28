@@ -7,6 +7,8 @@ use File::Find;
 use File::Basename;
 use Switch;
 use Net::LDAP;
+use Net::LDAP::Entry;
+use Net::LDAP::LDIF;
 use Net::LDAP::Util 'ldap_explode_dn';
 use Crypt::SmbHash qw(lmhash nthash);
 
@@ -116,6 +118,19 @@ helper find => sub {
                 filter => "(&(uid=$uid)(objectClass=posixAccount))",
         );
         $_->code and return undef;
+	warn 'find', Dumper($_->entry(0)->dn);
+	return $_->entry(0);
+};
+helper finddn => sub {
+	my $self = shift;
+	my $dn = shift;
+	return undef unless $dn;
+        $_ = $self->ldap->search(
+                base=>$dn,
+                filter => "objectClass=posixAccount",
+        );
+        $_->code and return undef;
+	warn 'finddn', Dumper($_->entry(0)->dn);
 	return $_->entry(0);
 };
 helper search => sub {
@@ -124,10 +139,11 @@ helper search => sub {
 	return () unless $q;
         $_ = $self->ldap->search(
                 base=>$self->config->{ldapbase},
-                filter => "(&(objectClass=person)(|(uid=$q*)(sn=$q*)(givenName=$q*)))",
+                filter => "(&(objectClass=posixAccount)(|(uid=$q*)(sn=$q*)(givenName=$q*)))",
         );
         return () if $_->is_error;
         return () unless $_->entries;
+	warn 'search', Dumper({entries => scalar $search->entries});
         return map { {label=>($_->get_value('gecos')||join(' ', $_->get_value('givenName')||'',$_->get_value('sn')||'')).' ('.$_->get_value('uid').')',value=>$_->get_value('uid')} } grep { $_->get_value('uid') } $_->entries;
 };
 helper ous => sub {
@@ -151,49 +167,81 @@ helper replace => sub {
 	return ('err','Error!') unless $dn;
 	%_ = (@_);
 	($_{sambaLMPassword}, $_{sambaNTPassword}) = (lmhash($_{userPassword}), nthash($_{userPassword})) if $_{userPassword};
-warn Dumper($dn, {%_});
-return 0?('err','Error!'):('ok','All good!');
-#	$_ = $self->ldap->modify($dn, replace => {%_});
-#	return $_->is_error?'err':'ok', $_->error;
+	warn 'replace', Dumper($dn, {%_});
+	$_ = $self->ldap->modify($dn, replace => {%_});
+	$self->lut_error($_);
 };
 helper delete => sub {
 	my $self = shift;
 	my $dn = shift;
 	return ('err','Error!') unless $dn;
-warn Dumper($dn);
-return 0?('err','Error!'):('ok','All good!');
-#	$_ = $self->ldap->delete($dn);
-#	return $_->is_error?'err':'ok', $_->error;
+	warn 'delete', Dumper($dn);
+	$_ = $self->ldap->delete($dn);
+	$self->lut_error($_);
 };
 helper add => sub {
 	my $self = shift;
 	my $dn = shift;
-	my $attrs = shift;
-	return ('err','Error!') unless $dn && ref $attrs eq 'ARRAY';
-warn Dumper($dn, {attrs=>$attrs});
-return 0?('err','Error!'):('ok','All good!');
-#	$_ = $self->ldap->add($dn, attrs=>$attrs);
-#	return $_->is_error?'err':'ok', $_->error;
+	my %attrs = @_;
+	return ('err','Error!') unless $dn;
+	warn 'add', Dumper($dn, {%attrs});
+	$_ = $self->ldap->add($dn, attrs=>[%attrs]);
+	$self->lut_error($_);
 };
 helper rename => sub {
 	my $self = shift;
 	my $dn = shift;
 	my $newrdn = shift;
 	return ('err','Error!') unless $dn && $newrdn;
-warn Dumper($dn, {deleteoldrdn=>1, newrdn=>$newrdn});
-return 0?('err','Error!'):('ok','All good!');
-#	$_ = $self->ldap->moddn($dn, deleteoldrdn=>1, newrdn=>$newrdn);
-#	return $_->is_error?'err':'ok', $_->error;
+	#warn 'rename', Dumper($dn, {deleteoldrdn=>1, newrdn=>$newrdn});
+	$_ = $self->ldap->moddn($dn, deleteoldrdn=>1, newrdn=>$newrdn);
+	$self->param('dn', $_->dn);
+	$self->lut_error($_);
 };
 helper move => sub {
 	my $self = shift;
 	my $dn = shift;
 	my $newlocation = shift;
 	return ('err','Error!') unless $dn && $newlocation;
-warn Dumper($dn, {newsuperior=>$newlocation});
-return 0?('err','Error!'):('ok','All good!');
-#	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation);
-#	return $_->is_error?'err':'ok', $_->error;
+	#warn 'move', Dumper($dn, {newsuperior=>$newlocation});
+	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation);
+	$self->param('dn', $_->dn);
+	$self->lut_error($_);
+};
+
+
+helper resetdir => sub {
+	my $self = shift;
+	my $user = shift;
+	return 'Requested user doesn\'t exist' unless defined $user;
+	warn "Resetting User ", $user->dn, "\n";
+	$self->system("sudo", "mkdir", "-p", $user->get_value('homeDirectory'));
+	$self->system("sudo", "chmod", "0700", $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
+	$self->system("sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gidNumber'), $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
+};
+helper system => sub {
+	my $self = shift;
+	my @system = @_;
+	warn join(' ', @system), "\n";
+	system @system;
+	if ( $? == -1 ) {
+		$self->lut_error("Failed to execute @system");
+	} else {
+		$self->lut_error($? >> 8 ? $! : undef);
+	}
+};
+helper lut_error => sub {
+	my $self = shift;
+	my $msg = shift;
+	if ( defined $msg ) {
+		if ( ref $msg ) {
+			push @{$self->{__LUT_ERROR}}, $msg->error if $msg->is_error;
+		} else {
+			push @{$self->{__LUT_ERROR}}, $msg;
+		}
+	}
+	$msg = join ',', grep { defined $_ } @{$self->{__LUT_ERROR}};
+	return $self->render_json(@{$self->{__LUT_ERROR}} ? {response=>'err',message=>$msg} : {response=>'ok',message=>'All is good!'});
 };
 
 get '/' => sub {
@@ -240,124 +288,158 @@ under '/home' => (authenticated => 1);
 get '/' => {template=>'home', view=>'user'};
 post '/changepassword' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my ($res, $msg) = $self->replace($self->param('dn'),
-		userPassword => $self->param('userPassword'),
-	);
-	$self->render_json({response=>$res,message=>$msg});
+	my $dn = $self->param('dn');
+	my ($u1, $u2) = ($self->param('userPassword'), $self->param('userPassword2'));
+	return $self->render_json({response=>'err',message=>'Error!  No user or passwords don\'t match'}) unless $dn && $u1 eq $u2;
+	$self->replace($dn, userPassword => $u1);
+	$self->lut_error;
 };
 
 under '/home/admin' => (authenticated => 1, has_priv => 'Domain Admins');
 get '/' => {template=>'home',view=>'admin'};
 get '/search' => (is_xhr=>1) => sub {
 	my $self = shift;
-warn Dumper($self->param('term'));
-	$self->render_json([$self->search($self->param('term'))]);
+	my $term = $self->param('term');
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $term;
+	$self->render_json([$self->search($term)]);
 };
 post '/addou' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($location, $ou, $description) = ($self->param('location'), $self->param('ou'), $self->param('description'));
 	return $self->render_json({response=>'err',message=>'Error!'}) unless $location && $ou && $description;
-	my ($res, $msg) = $self->add("ou=$ou,$location", [objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description]);
-	$self->render_json({response=>$res,message=>$msg});
+	$self->add("ou=$ou,$location", [objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description]);
+	$self->lut_error;
 };
 post '/resetdir' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my $uid = $self->param('uid');
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $uid;
-	warn "Resetting User $uid\n";
-	my ($res, $msg);
-	my $user = $self->find($uid);
-	my @system = ();
-	push @system, _system("sudo", "mv", $user->get_value('homeDirectory'), $self->param('homeDirectory')) if $user->get_value('homeDirectory') ne $self->param('homeDirectory') && -e $user->get_value('homeDirectory') && ! -e $self->param('homeDirectory');
-	push @system, _system("sudo", "mkdir", "-p", $user->get_value('homeDirectory'));
-	push @system, _system("sudo", "chmod", "0700", $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
-	push @system, _system("sudo", "chown", "-RLP", $user->get_value('uid').'.'.$user->get_value('gidNumber'), $user->get_value('homeDirectory')) if -e $user->get_value('homeDirectory');
-	$msg = join ',', grep { !undef } @system;
-	($res, $msg) = $msg ? ('err', $msg) : ('ok', 'All good!');
-	$self->render_json({response=>$res,message=>$msg});
+	my $dn = $self->param('dn');
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	$self->resetdir($self->finddn($dn));
+	$self->lut_error;
 };
 post '/update' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my ($res, $msg);
-	if ( $self->param('newuid') ne $self->param('uid') ) {
-            ($res, $msg) = $self->rename($self->param('dn'), "uid=".$self->param('newuid'));
-	} elsif ( $self->param('newlocation') ne $self->param('location') ) {
-            ($res, $msg) = $self->move($self->param('dn'), $self->param('newlocation'));
-	} else {
-            ($res, $msg) = $self->replace($self->param('dn'),
-                    gecos => $self->param('gecos'),
-                    givenName => $self->param('givenName'),
-                    sn => $self->param('sn'),
-                    uid => $self->param('uid'),
-                    userPassword => $self->param('userPassword'),
-                    homeDirectory => $self->param('homeDirectory'),
-                    accountStatus => $self->param('accountStatus'),
-                    mail => $self->param('mail'),
-                    loginShell => $self->param('loginShell'),
-                    description => $self->param('description'),
-            );
+	my $dn = $self->param('dn');
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	my $user = $self->finddn($dn);
+        $self->replace($user->dn,
+                gecos => $self->param('gecos'),
+                givenName => $self->param('givenName'),
+                sn => $self->param('sn'),
+                userPassword => $self->param('userPassword'),
+                homeDirectory => $self->param('homeDirectory'),
+                accountStatus => $self->param('accountStatus'),
+                mail => $self->param('mail'),
+                loginShell => $self->param('loginShell'),
+                description => $self->param('description'),
+        );
+	if ( $self->param('homeDirectory') ne $user->get_value('homeDirectory') ) {
+	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), $self->param('homeDirectory')) if -e $user->get_value('homeDirectory') && ! -e $self->param('homeDirectory');
+	    $self->resetdir($user);
 	}
-	$self->render_json({response=>$res,message=>$msg});
+	if ( lc($self->param('uid')) ne lc($user->get_value('uid')) ) {
+            if ( $user = $self->rename($user->dn, "uid=".$self->param('uid')) ) {
+		$user = $self->finddn($user->dn);
+	    } else {
+		$self->lut_error('Error renaming');
+	    }
+	}
+	if ( lc($user->dn) ne lc('uid='.$self->param('uid').','.$self->param('location')) ) {
+            if ( $user = $self->move($user->dn, $self->param('location')) ) {
+	        $user = $self->finddn($user->dn);
+	    } else {
+		$self->lut_error('error moving');
+	    }
+	}
+	$self->lut_error;
 };
 post '/remove' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my ($res, $msg) = $self->delete($self->param('dn'));
-	$self->render_json({response=>$res,message=>$msg});
+	my $dn = $self->param('dn');
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	my $user = $self->finddn($dn);
+        $_ = $self->ldap->search(
+                base=>$dn,
+                filter=>'objectClass=*',
+        );
+#        open(my $fh, ">/tmp/backup.ldif");
+#        my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
+#        $ldif->write_entry($_->entries);
+#	return $self->render_json({response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
+#	if ( $user->get_value('homeDirectory') && -e $user->get_value('homeDirectory') ) {
+#	    $self->system("sudo", "mv", '/tmp/backup.ldif', $user->get_value('homeDirectory'));
+#	    $self->system("sudo", "mkdir", "-p", '/data/deleted_users');
+#	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), '/data/deleted_users');
+#	}
+	$self->delete($dn);
+	$self->lut_error;
 };
 post '/copy' => (is_xhr=>1) => sub {
 	my $self = shift;
-	my ($res, $msg) = $self->add($self->param('dn'),
+	return $self->render_json({response=>'err',message=>'Error!'}) unless $self->param('dn');
+	my $from = $self->finddn($self->param('dn'));
+	my @uids = ();
+	while ( my (undef,undef,$uid) = getpwent ) {
+		push @uids, $uid unless $uid >= 65000 
+	}
+	my $nextuid = 1000;
+	foreach my $uid ( sort { $a <=> $b } @uids ) {
+		last if $uid != ++$nextuid;
+	}
+	return $self->render_json({response=>'err',message=>'Cannot add any more users, out of UIDs!'}) if $nextuid >= 65000;
+	endpwent;
+	my $sambaSID = $from->get_value('sambaSID');
+	$sambaSID =~ s/\d+$//;
+	$self->add('uid='.$self->param('uid').','.$self->param('location'),
+		objectClass => [$from->get_value('objectClass')],
+		(map { $_ => $from->get_value($_) } grep { /^samba/ } $from->attributes),
+		cn => [$self->param('givenName'), $self->param('gecos')],
+		gidNumber => $from->get_value('gidNumber'),
 		gecos => $self->param('gecos'),
+		displayName => $self->param('gecos'),
 		givenName => $self->param('givenName'),
 		sn => $self->param('sn'),
 		uid => $self->param('uid'),
+		uidNumber => $nextuid,
+		sambaSID => $sambaSID.($nextuid*2+1000),
+		shadowLastChange => 13790,
 		userPassword => $self->param('userPassword'),
+		sambaLMPassword => lmhash($self->param('userPassword')),
+		sambaNTPassword => nthash($self->param('userPassword')),
 		homeDirectory => $self->param('homeDirectory'),
 		accountStatus => $self->param('accountStatus'),
 		mail => $self->param('mail'),
 		loginShell => $self->param('loginShell'),
 		description => $self->param('description'),
 	);
-	$self->render_json({response=>$res,message=>$msg});
+	$self->resetdir($self->find($self->param('uid')));
+	$self->lut_error;
 };
+
 get '/gads' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($res, $msg);
 	warn "Executing GADS\n";
-	my @system = ();
-	push @system, _system("touch", "/tmp/gads");
-	$msg = join ',', grep { !undef } @system;
-	($res, $msg) = $msg ? ('err', $msg) : ('ok', 'All good!');
-	$self->render_json({response=>$res,message=>$msg});
+	$self->system("sudo", "/usr/local/GoogleAppsDirSync/sync-cmd", "-c", "/etc/gads/Duchesne.xml", "-a");
+	$self->lut_error;
 };
 get '/backup' => sub {
 	my $self = shift;
 	my ($res, $msg);
 	warn "Making Backup\n";
-	my @ldif = ();
 	$_ = $self->ldap->search(
 		base=>$self->config->{ldapbase},
 		filter=>'objectClass=*',
 	);
-	@ldif = map { $_->ldif(change=>0) } $_->entries if defined $_;
+	open(my $fh, ">", \my $buffer);
+	my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
+	$ldif->write_entry($_->entries);
 	$self->cookie(fileDownload=>'true');
 	$self->cookie(path=>'/');
-	$self->render(text=>join('', @ldif), format=>'ldif');
+	$self->render(text=>$buffer, format=>'ldif');
 };
 
 app->start;
-
-sub _system {
-	my @system = @_;
-	warn join(' ', @system), "\n";
-#	system @system;
-system "date";
-	if ( $? == -1 ) {
-		return 'Failed to execute @system';
-	} else {
-		return $? >> 8 ? $! : '';
-	}
-}
 
 __DATA__
 @@ home.html.ep
@@ -400,7 +482,7 @@ $(document).ready(function(){
     });
 
     function bind_buttons () {
-        $("#newlocation").val($("#location").val()); // Select OU in form
+        $("#location").val($("#Tlocation").val()); // Select OU in form
         $("#addou-location").val("ou=people,o=local"); // Select Location in Add OU form
         $("#search").val("");
         $("a.button").button();
@@ -411,7 +493,7 @@ $(document).ready(function(){
                 $("#user-msg").addClass('err').removeClass('ok').html("Passwords do not match!");
                 return false;
             }
-            $.post("<%= url_for 'changepassword' %>", $("#form").serialize(), function(data){
+            $.post("<%= url_for 'changepassword' %>", {dn: $("#form input[name=dn]").val(), userPassword: u1, userPassword2: u2}, function(data){
                 console.log(data);
                 if ( data.response == "ok" ) {
                     $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
@@ -422,7 +504,7 @@ $(document).ready(function(){
             return false;
         });
         $("#resetdir").click(function(){
-            $.post("<%= url_for 'resetdir' %>", {uid: $("#form input[name=uid]").val(), homeDirectory: $("#form input[name=homeDirectory]").val()}, function(data){
+            $.post("<%= url_for 'resetdir' %>", {dn: $("#form input[name=dn]").val()}, function(data){
                 console.log(data);
                 if ( data.response == "ok" ) {
                     $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
@@ -443,10 +525,11 @@ $(document).ready(function(){
             return false;
         });
         $("#remove").click(function(){
-            $.post("<%= url_for 'remove' %>", $("#form").serialize(), function(data){
+            $.post("<%= url_for 'remove' %>", {dn: $("#form input[name=dn]").val()}, function(data){
                 console.log(data);
                 if ( data.response == "ok" ) {
                     $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
+                    location.reload();
                 } else {
                     $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
                 }
@@ -471,17 +554,16 @@ $(document).ready(function(){
                         } else if ( $("#copy-userPassword").val() == "" ) {
                             $("#copy-msg").addClass('err').removeClass('ok').html("Missing Password").show().delay(2500).fadeOut();
                         } else {
-                            $("#dn").val($("#dn").val().replace($("#uid").val(), $("#copy-uid").val()));
+			    var origuid=$("#uid").val();
                             $("#homeDirectory").val($("#homeDirectory").val().replace($("#uid").val(), $("#copy-uid").val()));
                             $("#mail").val($("#mail").val().replace($("#uid").val(), $("#copy-uid").val()));
-                            $("#newuid").val($("#copy-uid").val());
                             $("#uid").val($("#copy-uid").val());
                             $("#givenName").val($("#copy-givenName").val());
                             $("#sn").val($("#copy-sn").val());
                             $("#gecos").val($("#copy-givenName").val()+' '+$("#copy-sn").val());
                             $("#userPassword").val($("#copy-userPassword").val());
                             copy.dialog("close");
-                            $.post("<%= url_for 'update' %>", $("#form").serialize(), function(data){
+                            $.post("<%= url_for 'copy' %>", $("#form").serialize(), function(data){
                                 console.log(data);
                                 if ( data.response == "ok" ) {
                                     $("#user-msg").addClass('ok').removeClass('err').html(data.message).show().delay(2500).fadeOut();
@@ -489,6 +571,11 @@ $(document).ready(function(){
                                     $("#user-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
                                 }
                             });
+                            $("#dn").val($("#dn").val().replace(origuid, $("#copy-uid").val()));
+			    $("#copy-givenName").val('');
+			    $("#copy-sn").val('');
+			    $("#copy-uid").val('');
+			    $("#copy-userPassword").val('');
                         }
                     },
                     Cancel: function() {
@@ -523,6 +610,7 @@ $(document).ready(function(){
                                     $("#addou-msg").addClass('err').removeClass('ok').html(data.message).show().delay(2500).fadeOut();
                                 }
                             });
+			    location.reload();
                         }
                     },
                     Cancel: function() {
@@ -568,7 +656,10 @@ $(document).ready(function(){
     Search: <%= text_field 'search', id=>'search' %>
     <hr />
 % } else {
-    %= link_to Admin => '/home/admin'
+  % if ( $self->has_priv("Domain Admins") ) {
+      %= link_to Admin => '/home/admin'
+      <br />
+  % }
 % }
 <div id="details" class="jTemplatesTest"></div>
 % if ( $view eq 'admin' ) {
@@ -606,14 +697,13 @@ $(document).ready(function(){
 @@ admin.html.ep
     <form id="form">
     <input type="hidden" name="dn" value="{$T.dn}" id="dn">
-    <input type="hidden" name="location" value="{$T.location}" id="location">
-    <input type="hidden" name="uid" value="{$T.uid}" id="uid">
+    <input type="hidden" name="Tlocation" value="{$T.location}" id="Tlocation"> <!-- This exists just so jquery can set the selected location -->
     <table>
-    <tr><td>OU</td><td><%= select_field newlocation => [$self->ous], id => 'newlocation' %> <img src="/plus.png" id="addou" class="link" height=12 width=12></td></tr>
+    <tr><td>OU</td><td><%= select_field location => [$self->ous], id => 'location' %> <img src="/plus.png" id="addou" class="link" height=12 width=12></td></tr>
     <tr><td>Name</td><td><input type="text" name="gecos" value="{$T.gecos}" id="gecos"></td></tr>
     <tr><td>First Name</td><td><input type="text" name="givenName" value="{$T.givenName}" id="givenName"></td></tr>
     <tr><td>Last Name</td><td><input type="text" name="sn" value="{$T.sn}" id="sn"></td></tr>
-    <tr><td>Username</td><td><input type="text" name="newuid" value="{$T.uid}" id="newuid"></td></tr>
+    <tr><td>Username</td><td><input type="text" name="uid" value="{$T.uid}" id="uid"></td></tr>
     <tr><td>Password</td><td><input type="text" name="userPassword" value="{$T.userPassword}" id="userPassword"></td></tr>
     <tr><td>Home Directory</td><td><input type="text" name="homeDirectory" value="{$T.homeDirectory}" id="homeDirectory"> <img src="/reset.png" id="resetdir" class="link" height=12 width=16></td></tr>
     <tr><td>Account Status</td><td><input type="text" name="accountStatus" value="{$T.accountStatus}"></td></tr>
@@ -627,6 +717,7 @@ $(document).ready(function(){
 
 @@ user.html.ep
     <form id="form">
+    <input type="hidden" name="dn" value="{$T.dn}" id="dn">
     <table>
     <tr><td>Name</td><td>{$T.gecos}</td></tr>
     <tr><td>E-mail Address</td><td>{$T.mail}</td></tr>
