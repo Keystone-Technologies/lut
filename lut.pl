@@ -45,9 +45,9 @@ app->config(hypnotoad => {pid_file=>"$Bin/../.$basename", listen=>[split ',', $E
 plugin 'IsXHR';
 plugin 'authentication' => {
 	'autoload_user' => 1,
-	'session_key' => '272djn32lk32jhsuieghi383hwskl',
 	'load_user' => sub {
 		my ($self, $uid) = @_;
+		$uid = escape_filter_value($uid);
 		my $search = $self->ldap->search(
 			base=>$self->config->{ldapbase},
 			filter => "(&(objectClass=person)(accountStatus=active)(uid=$uid))",
@@ -59,9 +59,11 @@ plugin 'authentication' => {
 	'validate_user' => sub {
 		my ($self, $username, $password, $extradata) = @_;
 		return undef unless defined $username;
+		$username = escape_filter_value($username);
+		$password = escape_filter_value($password);
 		my $search = $self->ldap->search(
 			base=>$self->config->{ldapbase},
-			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username))",
+			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username)(userPassword=$password))",
 		);
 		$search->code and do { warn $search->error; return undef; };
 		if ( my $entry = $search->entry(0) ) {
@@ -380,9 +382,9 @@ post '/copy' => (is_xhr=>1) => sub {
 	my $from = $self->finddn($self->param('dn'));
 	my @uids = ();
 	while ( my (undef,undef,$uid) = getpwent ) {
-		push @uids, $uid unless $uid >= 65000 
+		push @uids, $uid unless $uid < 1000 || $uid >= 65000 || grep { $_ == $uid } @uids
 	}
-	my $nextuid = 1000;
+	my $nextuid = 999;
 	foreach my $uid ( sort { $a <=> $b } @uids ) {
 		last if $uid != ++$nextuid;
 	}
