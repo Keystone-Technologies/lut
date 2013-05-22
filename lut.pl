@@ -9,7 +9,7 @@ use Switch;
 use Net::LDAP;
 use Net::LDAP::Entry;
 use Net::LDAP::LDIF;
-use Net::LDAP::Util 'ldap_explode_dn';
+use Net::LDAP::Util qw/ldap_explode_dn escape_filter_value/;
 use Crypt::SmbHash qw(lmhash nthash);
 
 use Data::Dumper;
