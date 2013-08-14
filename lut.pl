@@ -281,7 +281,7 @@ post '/details' => (is_xhr=>1) => sub {
 		uid => $details->get_value('uid')||'',
 		userPassword => $details->get_value('userPassword')||'',
 		homeDirectory => $details->get_value('homeDirectory')||'',
-		accountStatus => $details->get_value('accountStatus')||'',
+		accountStatus => $details->get_value('accountStatus')||'', # Note, ldapbulkacct might not create mail attr but they are required for this tool
 		mail => $details->get_value('mail')||'',
 		loginShell => $details->get_value('loginShell')||'',
 		description => $details->get_value('description')||'',
