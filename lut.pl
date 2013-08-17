@@ -25,6 +25,8 @@ plugin Config => {
 		ldapversion => $ENV{LDAPVERSION} || 3,
 		ldapbinddn => $ENV{LDAPBINDDN} || 'cn=Manager,o=Local',
 		ldapbindpw => $ENV{LDAPBINDPW} || 'secret',
+		mojo_reverse_proxy => $ENV{MOJO_REVERSE_PROXY},
+		mojo_listen => $ENV{MOJO_LISTEN} || 'https://*:3000',
 	}
 };
 warn "Connecting to LDAP ", app->config->{ldaphost}, " port ", app->config->{ldapport}, " version ", app->config->{ldapversion}, "\n";
@@ -43,7 +45,7 @@ $search->code && die "Cannot find base ".app->config->{ldapbase}.": ".$search->e
 #warn $entry->dn, "\n";
 app->types->type(ldif => 'application/ldif');
 
-app->config(hypnotoad => {pid_file=>"$Bin/../.$basename", listen=>[split ',', $ENV{MOJO_LISTEN}], proxy=>$ENV{MOJO_REVERSE_PROXY}});
+app->config(hypnotoad => {pid_file=>"$Bin/../.$basename", listen=>[split ',', app->config->{mojo_listen}], proxy=>app->config->{mojo_reverse_proxy}});
 plugin 'IsXHR';
 plugin 'authentication' => {
 	'autoload_user' => 1,
