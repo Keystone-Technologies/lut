@@ -5,6 +5,7 @@ use lib "$Bin/lib";
 use File::Path;
 use File::Find;
 use File::Basename;
+use IO::Socket::SSL;
 use Net::LDAP;
 use Net::LDAP::Entry;
 use Net::LDAP::LDIF;
