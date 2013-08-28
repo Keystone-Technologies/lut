@@ -69,7 +69,7 @@ plugin 'authentication' => {
 		$password = escape_filter_value($password);
 		my $search = $self->ldap->search(
 			base=>$self->config->{ldapbase},
-			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username)(userPassword=$password))",
+			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username)(userPassword=$password))", # Only works with cleartext passwords
 		);
 		$search->code and do { warn $search->error; return undef; };
 		if ( my $entry = $search->entry(0) ) {
