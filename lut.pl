@@ -5,7 +5,7 @@ use lib "$Bin/lib";
 use File::Path;
 use File::Find;
 use File::Basename;
-use Switch;
+use IO::Socket::SSL;
 use Net::LDAP;
 use Net::LDAP::Entry;
 use Net::LDAP::LDIF;
@@ -29,8 +29,12 @@ plugin Config => {
 		ldapversion => $ENV{LDAPVERSION} || 3,
 		ldapbinddn => $ENV{LDAPBINDDN} || 'cn=Manager,o=Local',
 		ldapbindpw => $ENV{LDAPBINDPW} || 'secret',
+		mojo_reverse_proxy => $ENV{MOJO_REVERSE_PROXY},
+		mojo_listen => $ENV{MOJO_LISTEN} || 'https://*:3000',
 	}
 };
+$ENV{MOJO_LISTEN} = app->config->{mojo_listen};
+$ENV{MOJO_REVERSE_PROXY} = app->config->{mojo_reverse_proxy};
 warn "Connecting to LDAP ", app->config->{ldaphost}, " port ", app->config->{ldapport}, " version ", app->config->{ldapversion}, "\n";
 my $ldap = Net::LDAP->new(app->config->{ldaphost}, port=>app->config->{ldapport}, version=>app->config->{ldapversion}); # Need a timeout here.
 warn "Connected.\n";
@@ -69,7 +73,7 @@ plugin 'authentication' => {
 		$password = escape_filter_value($password);
 		my $search = $self->ldap->search(
 			base=>$self->config->{ldapbase},
-			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username)(userPassword=$password))",
+			filter => "(&(objectClass=person)(accountStatus=active)(uid=$username)(userPassword=$password))", # Only works with cleartext passwords
 		);
 		$search->code and do { warn $search->error; return undef; };
 		if ( my $entry = $search->entry(0) ) {
