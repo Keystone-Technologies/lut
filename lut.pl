@@ -16,6 +16,10 @@ use Data::Dumper;
 
 # uuencode -m file.js /dev/stdout >> lut.pl
 
+# cpanm App::perlbrew
+# perlbrew available
+# perlbrew install perl-5.18.1
+
 my $basename = basename $0, '.pl';
 plugin Config => {
 	default => {
