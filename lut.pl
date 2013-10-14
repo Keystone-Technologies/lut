@@ -561,6 +561,8 @@ $(document).ready(function(){
                             $("#copy-msg").addClass('err').removeClass('ok').html("Missing First Name").show().delay(2500).fadeOut();
                         } else if ( $("#copy-sn").val() == "" ) {
                             $("#copy-msg").addClass('err').removeClass('ok').html("Missing Last Name").show().delay(2500).fadeOut();
+                        } else if ( $("#copy-mail").val() == "" ) {
+                            $("#copy-msg").addClass('err').removeClass('ok').html("Missing Email Address").show().delay(2500).fadeOut();
                         } else if ( $("#copy-uid").val() == "" ) {
                             $("#copy-msg").addClass('err').removeClass('ok').html("Missing Username").show().delay(2500).fadeOut();
                         } else if ( $("#copy-userPassword").val() == "" ) {
@@ -568,7 +570,7 @@ $(document).ready(function(){
                         } else {
 			    var origuid=$("#uid").val();
                             $("#homeDirectory").val($("#homeDirectory").val().replace($("#uid").val(), $("#copy-uid").val()));
-                            $("#mail").val($("#mail").val().replace($("#uid").val(), $("#copy-uid").val()));
+                            $("#mail").val($("#copy-mail").val())
                             $("#uid").val($("#copy-uid").val());
                             $("#givenName").val($("#copy-givenName").val());
                             $("#sn").val($("#copy-sn").val());
@@ -586,6 +588,7 @@ $(document).ready(function(){
                             $("#dn").val($("#dn").val().replace(origuid, $("#copy-uid").val()));
 			    $("#copy-givenName").val('');
 			    $("#copy-sn").val('');
+			    $("#copy-mail").val('');
 			    $("#copy-uid").val('');
 			    $("#copy-userPassword").val('');
                         }
@@ -697,6 +700,7 @@ $(document).ready(function(){
         <table>
         <tr><td>First Name</td><td><input id="copy-givenName" type='text' name='givenName' maxlength='60'></td></tr>
         <tr><td>Last Name</td><td><input id="copy-sn" type='text' name='sn' maxlength='60'></td></tr>
+        <tr><td>Email Address</td><td><input id="copy-mail" type='text' name='mail' maxlength='60'></td></tr>
         <tr><td>Username</td><td><input id="copy-uid" type='text' name='uid' maxlength='60'></td></tr>
         <tr><td>Password</td><td><input id="copy-userPassword" type='text' name='userPassword' maxlength='60'></td></tr>
         <tr><td colspan="2"><div id="copy-msg" class="msg"></div></td></tr>
