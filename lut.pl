@@ -213,10 +213,11 @@ helper rename => sub {
 helper move => sub {
 	my $self = shift;
 	my $dn = shift;
+	my $newrdn = shift;
 	my $newlocation = shift;
 	return ('err','Error!') unless $dn && $newlocation;
-	#warn 'move', Dumper($dn, {newsuperior=>$newlocation});
-	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation);
+	warn 'move', Dumper([$dn, {newsuperior=>$newlocation}]);
+	$_ = $self->ldap->moddn($dn, newsuperior=>$newlocation, newrdn=>$newrdn);
 	$self->param('dn', $_->dn);
 	$self->lut_error($_);
 };
@@ -350,14 +351,14 @@ post '/update' => (is_xhr=>1) => sub {
 	    $self->resetdir($user);
 	}
 	if ( lc($self->param('uid')) ne lc($user->get_value('uid')) ) {
-            if ( $user = $self->rename($user->dn, "uid=".$self->param('uid')) ) {
+            if ( $self->rename($user->dn, "uid=".$self->param('uid')) ) {
 		$user = $self->finddn($user->dn);
 	    } else {
 		$self->lut_error('Error renaming');
 	    }
 	}
 	if ( lc($user->dn) ne lc('uid='.$self->param('uid').','.$self->param('location')) ) {
-            if ( $user = $self->move($user->dn, $self->param('location')) ) {
+            if ( $self->move($user->dn, "uid=".$self->param('uid'), $self->param('location')) ) {
 	        $user = $self->finddn($user->dn);
 	    } else {
 		$self->lut_error('error moving');
