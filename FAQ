@@ -1,0 +1,1 @@
+$ perl lut.pl get -v -M POST -H "Cookie: $(perl lut.pl get -v -M POST '/login?username=username&password=password'  2>&1 | grep ^Set-Cookie: | cut -d' ' -f 2-)" -H 'X-Requested-With: XMLHttpRequest' '/details?details=username' /uid
