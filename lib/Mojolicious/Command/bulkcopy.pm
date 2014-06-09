@@ -5,27 +5,31 @@ has description => 'Show versions of installed modules.';
 has usage => sub { shift->extract_usage };
 
 sub run {
-  my ($self, $username, $password, $template) = @_;
+  my ($self, $header, $columns, $username, $password, $template) = @_;
 
   my $ua = $self->app->ua;
   my $tx;
   $tx = $ua->post("/login?username=$username&password=$password");
   my $from = $ua->post("/details?details=$template" => {'X-Requested-With' => 'XMLHttpRequest'})->res->json;
-  $_ = <STDIN>;
+  $_ = <STDIN> if $header;
   while ( <STDIN> ) {
-    my ($n, $givenName, $sn, undef, $uid, $userPassword, $mail) = split /,/, $_;
+    @_ = split /,/, $_;
+    my %input = ();
+    foreach $column ( split /,/, $columns ) {
+      $input{$column||'undef'} = shift @_;
+    }
     my $to = $from;
-    $to->{uid} = $uid;
-    $to->{homeDirectory} =~ s/[^\/]+$/$uid/;
-    $to->{gecos} = join ' ', $givenName, $sn;
-    $to->{sn} = $sn;
-    $to->{givenName} = $givenName;
-    $to->{mail} = $mail;
-    $to->{userPassword} = $userPassword;
+    $to->{uid} = $input{uid} || lc($input{sn}.substr($input{$givenName},0,1));
+    $to->{homeDirectory} =~ s/[^\/]+$/$to->{uid}/;
+    $to->{gecos} = join ' ', $input{givenName}, $input{sn};
+    $to->{sn} = $input{sn};
+    $to->{givenName} = $input{givenName};
+    $to->{mail} = $input{mail} or $to->{mail} =~ s/^[^\@]/$to->{uid}/;
+    $to->{userPassword} = $input{userPassword};
     my $copy = join '&', map { "$_=$to->{$_}" } keys %$to;
     #warn "/home/admin/copy?$copy\n";
-    warn "Adding $uid\n";
-    say Data::Dumper::Dumper($ua->post("/home/admin/copy?$copy" => {'X-Requested-With' => 'XMLHttpRequest'})->res->json);
+    warn "Adding $to->{uid} ($copy)\n";
+    #say Data::Dumper::Dumper($ua->post("/home/admin/copy?$copy" => {'X-Requested-With' => 'XMLHttpRequest'})->res->json);
   }
 }
 
