@@ -130,6 +130,7 @@ helper find => sub {
                 filter => "(&(uid=$uid)(objectClass=posixAccount))",
         );
         $_->code and return undef;
+	$_->entry(0) or return undef;
 	warn 'find', Dumper($_->entry(0)->dn);
 	return $_->entry(0);
 };
@@ -142,6 +143,7 @@ helper finddn => sub {
                 filter => "objectClass=posixAccount",
         );
         $_->code and return undef;
+	$_->entry(0) or return undef;
 	warn 'finddn', Dumper($_->entry(0)->dn);
 	return $_->entry(0);
 };
@@ -321,9 +323,9 @@ post '/addou' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($location, $ou, $description) = ($self->param('location'), $self->param('ou'), $self->param('description'));
 	return $self->render(json => {response=>'err',message=>'Error!'}) unless $location && $ou && $description;
-	$self->add("ou=$ou,$location", [objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description]);
+	$self->add("ou=$ou,$location", objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description);
 	$self->lut_error;
-};
+} => 'addou';
 post '/resetdir' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $dn = $self->param('dn');
@@ -392,6 +394,7 @@ post '/remove' => (is_xhr=>1) => sub {
 post '/copy' => (is_xhr=>1) => sub {
 	my $self = shift;
 	return $self->render(json => {response=>'err',message=>'Error!'}) unless $self->param('dn');
+	return $self->render(json => {response=>'err',message=>'User already exists!'}) if $self->find($self->param('uid'));
 	my $from = $self->finddn($self->param('dn'));
 	my @uids = ();
 	while ( my (undef,undef,$uid) = getpwent ) {
@@ -404,8 +407,13 @@ post '/copy' => (is_xhr=>1) => sub {
 	return $self->render(json => {response=>'err',message=>'Cannot add any more users, out of UIDs!'}) if $nextuid >= 65000;
 	endpwent;
 	my $sambaSID = $from->get_value('sambaSID');
+	my $localStudentGradYr = $self->param('localStudentGradYr');
+	my $location = $self->param('location');
+	$location =~ s/ou=\d{4}/ou=$localStudentGradYr/ if $localStudentGradYr;
+	my $homeDirectory = $self->param('homeDirectory');
+	$homeDirectory =~ s/\b\d{4}\b/$localStudentGradYr/ if $localStudentGradYr;
 	$sambaSID =~ s/\d+$//;
-	$self->add('uid='.$self->param('uid').','.$self->param('location'),
+	$self->add('uid='.$self->param('uid').','.$location,
 		objectClass => [$from->get_value('objectClass')],
 		(map { $_ => $from->get_value($_) } grep { /^samba/ } $from->attributes),
 		cn => [$self->param('givenName'), $self->param('gecos')],
@@ -421,7 +429,7 @@ post '/copy' => (is_xhr=>1) => sub {
 		userPassword => $self->param('userPassword'),
 		sambaLMPassword => lmhash($self->param('userPassword')),
 		sambaNTPassword => nthash($self->param('userPassword')),
-		homeDirectory => $self->param('homeDirectory'),
+		homeDirectory => $homeDirectory,
 		accountStatus => $self->param('accountStatus'),
 		mail => $self->param('mail'),
 		localPersonID => $self->param('localPersonID'),
@@ -576,6 +584,7 @@ $(document).ready(function(){
                             $("#homeDirectory").val($("#homeDirectory").val().replace($("#uid").val(), $("#copy-uid").val()));
                             $("#mail").val($("#copy-mail").val())
                             $("#localPersonID").val($("#copy-localPersonID").val())
+                            $("#localStudentGradYr").val($("#copy-localStudentGradYr").val())
                             $("#uid").val($("#copy-uid").val());
                             $("#givenName").val($("#copy-givenName").val());
                             $("#sn").val($("#copy-sn").val());
@@ -595,6 +604,7 @@ $(document).ready(function(){
 			    $("#copy-sn").val('');
 			    $("#copy-mail").val('');
 			    $("#copy-localPersonID").val('');
+			    $("#copy-localStudentGradYr").val('');
 			    $("#copy-uid").val('');
 			    $("#copy-userPassword").val('');
                         }
@@ -707,6 +717,7 @@ $(document).ready(function(){
         <tr><td>First Name</td><td><input id="copy-givenName" type='text' name='givenName' maxlength='60'></td></tr>
         <tr><td>Last Name</td><td><input id="copy-sn" type='text' name='sn' maxlength='60'></td></tr>
         <tr><td>Person ID</td><td><input id="copy-localPersonID" type='text' name='localPersonID' maxlength='60'></td></tr>
+        <tr><td>Grad Year</td><td><input id="copy-localStudentGradYr" type='text' name='localStudentGradYr' maxlength='60'></td></tr>
         <tr><td>Email Address</td><td><input id="copy-mail" type='text' name='mail' maxlength='60'></td></tr>
         <tr><td>Username</td><td><input id="copy-uid" type='text' name='uid' maxlength='60'></td></tr>
         <tr><td>Password</td><td><input id="copy-userPassword" type='text' name='userPassword' maxlength='60'></td></tr>

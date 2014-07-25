@@ -4,8 +4,28 @@ use Mojo::Base 'Mojolicious::Command';
 has description => 'Show versions of installed modules.';
 has usage => sub { shift->extract_usage };
 
+use Getopt::Long;
+
 sub run {
-  my ($self, $header, $sep, $columns, $username, $password, $template) = @_;
+  my $self = shift;
+  @ARGV = @_;
+  my $header = 0;
+  my $sep = "\t";
+  my $columns;
+  my $username;
+  my $password;
+  my $template;
+  my $execute = 0;
+  GetOptions(
+          'header|H' => \$header,
+          'sep|s=s' => \$sep,
+          'columns|c=s' => \$columns,
+          'username|u=s' => \$username,
+          'password|p=s' => \$password,
+          'template|t=s' => \$template,
+          'execute|E' => \$execute,
+  );
+  die "Usage: $0 bulkcopy [-H] [-s _] [-E] -c c,o,l,u,m,n,s -t template_user -u loginacct -p password\n" unless $columns && $template && $username && $password;
 
   my $ua = $self->app->ua;
   my $tx;
@@ -25,12 +45,14 @@ sub run {
     $to->{gecos} = join ' ', $input{givenName}, $input{sn};
     $to->{sn} = $input{sn};
     $to->{givenName} = $input{givenName};
+    $to->{localPersonID} = $input{localPersonID} if $input{localPersonID};
+    $to->{localStudentGradYr} = $input{localStudentGradYr} if $input{localStudentGradYr};
     $to->{mail} =~ s/^[^\@]+/$to->{uid}/; $to->{mail} = $input{mail} if $input{mail};
     $to->{userPassword} = $input{userPassword};
     my $copy = join '&', map { "$_=$to->{$_}" } keys %$to;
-    #warn "/home/admin/copy?$copy\n";
     warn "Adding $to->{uid}\n";
-    say Data::Dumper::Dumper($ua->post("/home/admin/copy?$copy" => {'X-Requested-With' => 'XMLHttpRequest'})->res->json);
+    warn "/home/admin/copy?$copy\n" unless $execute;
+    say Data::Dumper::Dumper($ua->post("/home/admin/copy?$copy" => {'X-Requested-With' => 'XMLHttpRequest'})->res->json) if $execute;
   }
 }
 
@@ -48,7 +70,7 @@ Student_Number,First_Name,Last_Name,Grade_Level,Username,Password,email,,,School
 "sn":"Choinka",
 "mail":"kchoinka@duchesne-hs.org",
 "accountStatus":"active",
-"userPassword":"imissc00kie",
+"userPassword":"xxx",
 "givenName":"Kim",
 "loginShell":"\/bin\/bash",
 "dn":"uid=kchoinka,ou=staff,ou=people,o=local"}
