@@ -156,7 +156,7 @@ helper search => sub {
         return () if $_->is_error;
         return () unless $_->entries;
 	warn 'search', Dumper({entries => scalar $search->entries});
-        return map { {label=>($_->get_value('gecos')||join(' ', $_->get_value('givenName')||'',$_->get_value('sn')||'')).' ('.$_->get_value('uid').')',value=>$_->get_value('uid')} } grep { $_->get_value('uid') } $_->entries;
+        return map { {label=>($_->get_value('gecos')||$_->get_value('localPersonID')||join(' ', $_->get_value('givenName')||'',$_->get_value('sn')||'')).' ('.$_->get_value('uid').')',value=>$_->get_value('uid')} } grep { $_->get_value('uid') } $_->entries;
 };
 helper ous => sub {
 	my $self = shift;
@@ -254,7 +254,7 @@ helper lut_error => sub {
 		}
 	}
 	$msg = join ',', grep { defined $_ } @{$self->{__LUT_ERROR}};
-	return $self->render_json(@{$self->{__LUT_ERROR}} ? {response=>'err',message=>$msg} : {response=>'ok',message=>'All is good!'});
+	return $self->render(json => @{$self->{__LUT_ERROR}} ? {response=>'err',message=>$msg} : {response=>'ok',message=>'All is good!'});
 };
 
 get '/' => sub {
@@ -281,7 +281,7 @@ post '/details' => (is_xhr=>1) => sub {
 	my $details = $self->role eq 'admin' ? $self->find($self->param('details')) || $self->current_user : $self->current_user;
 	my $location = $details->dn;
 	$location =~ s/^[^,]+,//;
-	$self->render_json({
+	$self->render(json => {
 		dn => lc($details->dn)||'',
 		location => lc($location)||'',
 		gecos => $details->get_value('gecos')||'',
@@ -292,6 +292,7 @@ post '/details' => (is_xhr=>1) => sub {
 		homeDirectory => $details->get_value('homeDirectory')||'',
 		accountStatus => $details->get_value('accountStatus')||'', # Note, ldapbulkacct might not create mail attr but they are required for this tool
 		mail => $details->get_value('mail')||'',
+		localPersonID => $details->get_value('localPersonID')||'',
 		loginShell => $details->get_value('loginShell')||'',
 		description => $details->get_value('description')||'',
 	});
@@ -303,7 +304,7 @@ post '/changepassword' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $dn = $self->param('dn');
 	my ($u1, $u2) = ($self->param('userPassword'), $self->param('userPassword2'));
-	return $self->render_json({response=>'err',message=>'Error!  No user or passwords don\'t match'}) unless $dn && $u1 eq $u2;
+	return $self->render(json => {response=>'err',message=>'Error!  No user or passwords don\'t match'}) unless $dn && $u1 eq $u2;
 	$self->replace($dn, userPassword => $u1);
 	$self->lut_error;
 };
@@ -313,27 +314,27 @@ get '/' => {template=>'home',view=>'admin'};
 get '/search' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $term = $self->param('term');
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $term;
-	$self->render_json([$self->search($term)]);
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $term;
+	$self->render(json => [$self->search($term)]);
 };
 post '/addou' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($location, $ou, $description) = ($self->param('location'), $self->param('ou'), $self->param('description'));
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $location && $ou && $description;
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $location && $ou && $description;
 	$self->add("ou=$ou,$location", [objectClass => ['top', 'organizationalUnit'], ou => $ou, description => $description]);
 	$self->lut_error;
 };
 post '/resetdir' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $dn = $self->param('dn');
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $dn;
 	$self->resetdir($self->finddn($dn));
 	$self->lut_error;
 };
 post '/update' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $dn = $self->param('dn');
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $dn;
 	my $user = $self->finddn($dn);
         $self->replace($user->dn,
                 gecos => $self->param('gecos'),
@@ -343,6 +344,7 @@ post '/update' => (is_xhr=>1) => sub {
                 homeDirectory => $self->param('homeDirectory'),
                 accountStatus => $self->param('accountStatus'),
                 mail => $self->param('mail'),
+                localPersonID => $self->param('localPersonID'),
                 loginShell => $self->param('loginShell'),
                 description => $self->param('description'),
         );
@@ -369,7 +371,7 @@ post '/update' => (is_xhr=>1) => sub {
 post '/remove' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my $dn = $self->param('dn');
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $dn;
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $dn;
 	my $user = $self->finddn($dn);
         $_ = $self->ldap->search(
                 base=>$dn,
@@ -378,7 +380,7 @@ post '/remove' => (is_xhr=>1) => sub {
 #        open(my $fh, ">/tmp/backup.ldif");
 #        my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
 #        $ldif->write_entry($_->entries);
-#	return $self->render_json({response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
+#	return $self->render(json => {response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
 #	if ( $user->get_value('homeDirectory') && -e $user->get_value('homeDirectory') ) {
 #	    $self->system("sudo", "mv", '/tmp/backup.ldif', $user->get_value('homeDirectory'));
 #	    $self->system("sudo", "mkdir", "-p", '/data/deleted_users');
@@ -389,7 +391,7 @@ post '/remove' => (is_xhr=>1) => sub {
 };
 post '/copy' => (is_xhr=>1) => sub {
 	my $self = shift;
-	return $self->render_json({response=>'err',message=>'Error!'}) unless $self->param('dn');
+	return $self->render(json => {response=>'err',message=>'Error!'}) unless $self->param('dn');
 	my $from = $self->finddn($self->param('dn'));
 	my @uids = ();
 	while ( my (undef,undef,$uid) = getpwent ) {
@@ -399,7 +401,7 @@ post '/copy' => (is_xhr=>1) => sub {
 	foreach my $uid ( sort { $a <=> $b } @uids ) {
 		last if $uid != ++$nextuid;
 	}
-	return $self->render_json({response=>'err',message=>'Cannot add any more users, out of UIDs!'}) if $nextuid >= 65000;
+	return $self->render(json => {response=>'err',message=>'Cannot add any more users, out of UIDs!'}) if $nextuid >= 65000;
 	endpwent;
 	my $sambaSID = $from->get_value('sambaSID');
 	$sambaSID =~ s/\d+$//;
@@ -422,6 +424,7 @@ post '/copy' => (is_xhr=>1) => sub {
 		homeDirectory => $self->param('homeDirectory'),
 		accountStatus => $self->param('accountStatus'),
 		mail => $self->param('mail'),
+		localPersonID => $self->param('localPersonID'),
 		loginShell => $self->param('loginShell'),
 		description => $self->param('description'),
 	);
@@ -433,7 +436,7 @@ get '/gads' => (is_xhr=>1) => sub {
 	my $self = shift;
 	my ($res, $msg);
 	warn "Executing GADS\n";
-	$self->system("sudo", "/usr/local/GoogleAppsDirSync/sync-cmd", "-c", "/etc/gads/Duchesne.xml", "-a");
+	$self->system("sudo", "/usr/local/GoogleAppsDirSync/sync-cmd", "-c", "/etc/gads/gads.xml", "-a");
 	$self->lut_error;
 };
 get '/backup' => sub {
@@ -572,6 +575,7 @@ $(document).ready(function(){
 			    var origuid=$("#uid").val();
                             $("#homeDirectory").val($("#homeDirectory").val().replace($("#uid").val(), $("#copy-uid").val()));
                             $("#mail").val($("#copy-mail").val())
+                            $("#localPersonID").val($("#copy-localPersonID").val())
                             $("#uid").val($("#copy-uid").val());
                             $("#givenName").val($("#copy-givenName").val());
                             $("#sn").val($("#copy-sn").val());
@@ -590,6 +594,7 @@ $(document).ready(function(){
 			    $("#copy-givenName").val('');
 			    $("#copy-sn").val('');
 			    $("#copy-mail").val('');
+			    $("#copy-localPersonID").val('');
 			    $("#copy-uid").val('');
 			    $("#copy-userPassword").val('');
                         }
@@ -701,6 +706,7 @@ $(document).ready(function(){
         <table>
         <tr><td>First Name</td><td><input id="copy-givenName" type='text' name='givenName' maxlength='60'></td></tr>
         <tr><td>Last Name</td><td><input id="copy-sn" type='text' name='sn' maxlength='60'></td></tr>
+        <tr><td>Person ID</td><td><input id="copy-localPersonID" type='text' name='localPersonID' maxlength='60'></td></tr>
         <tr><td>Email Address</td><td><input id="copy-mail" type='text' name='mail' maxlength='60'></td></tr>
         <tr><td>Username</td><td><input id="copy-uid" type='text' name='uid' maxlength='60'></td></tr>
         <tr><td>Password</td><td><input id="copy-userPassword" type='text' name='userPassword' maxlength='60'></td></tr>
@@ -720,6 +726,7 @@ $(document).ready(function(){
     <tr><td>Name</td><td><input type="text" name="gecos" value="{$T.gecos}" id="gecos"></td></tr>
     <tr><td>First Name</td><td><input type="text" name="givenName" value="{$T.givenName}" id="givenName"></td></tr>
     <tr><td>Last Name</td><td><input type="text" name="sn" value="{$T.sn}" id="sn"></td></tr>
+    <tr><td>Person ID</td><td><input type="text" name="localPersonID" value="{$T.localPersonID}" id="localPersonID"></td></tr>
     <tr><td>Username</td><td><input type="text" name="uid" value="{$T.uid}" id="uid"></td></tr>
     <tr><td>Password</td><td><input type="text" name="userPassword" value="{$T.userPassword}" id="userPassword"></td></tr>
     <tr><td>Home Directory</td><td><input type="text" name="homeDirectory" value="{$T.homeDirectory}" id="homeDirectory"> <img src="/reset.png" id="resetdir" class="link" height=12 width=16></td></tr>
