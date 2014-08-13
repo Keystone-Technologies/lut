@@ -57,20 +57,3 @@ sub run {
 }
 
 1;
-
-__END__
-Student_Number,First_Name,Last_Name,Grade_Level,Username,Password,email,,,School,User Type
-180010,Dylan,Altheimer,8,altheimerd,7EUK8M7Y,altheimerd@students.duchesne-hs.org,,,Duchesne,Student
-
-{"uid":"kchoinka",
-"location":"ou=staff,ou=people,o=local",
-"homeDirectory":"\/data\/users\/staff\/kchoinka",
-"description":"Staff",
-"gecos":"Kim Choinka",
-"sn":"Choinka",
-"mail":"kchoinka@duchesne-hs.org",
-"accountStatus":"active",
-"userPassword":"xxx",
-"givenName":"Kim",
-"loginShell":"\/bin\/bash",
-"dn":"uid=kchoinka,ou=staff,ou=people,o=local"}

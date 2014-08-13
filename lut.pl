@@ -433,6 +433,7 @@ post '/copy' => (is_xhr=>1) => sub {
 		accountStatus => $self->param('accountStatus'),
 		mail => $self->param('mail'),
 		localPersonID => $self->param('localPersonID'),
+		localStudentGradYr => $self->param('localStudentGradYr'),
 		loginShell => $self->param('loginShell'),
 		description => $self->param('description'),
 	);
@@ -695,7 +696,10 @@ $(document).ready(function(){
 <div id="details" class="jTemplatesTest"></div>
 % if ( $view eq 'admin' ) {
     <hr />
-    <a class="button" id="gads">Google Sync</a> <a class="button fileDownloadSimpleRichExperience" href="<%= url_for 'backup' %>" id="backup">Download Backup</a>
+    % if ( -e '/etc/gads/gads.xml' ) {
+    <a class="button" id="gads">Google Sync</a>
+    % }
+    <a class="button fileDownloadSimpleRichExperience" href="<%= url_for 'backup' %>" id="backup">Download Backup</a>
     <div id="admin-msg" class="msg">
 % }
 <textarea id="t_details" style="display:none">
