@@ -413,6 +413,7 @@ post '/copy' => (is_xhr=>1) => sub {
 	my $homeDirectory = $self->param('homeDirectory');
 	$homeDirectory =~ s/\b\d{4}\b/$localStudentGradYr/ if $localStudentGradYr;
 	$sambaSID =~ s/\d+$//;
+	do { $self->param($_ => '') unless $self->param($_); warn "$_: ".$self->param($_)."\n" } foreach ( $self->param );
 	$self->add('uid='.$self->param('uid').','.$location,
 		objectClass => [$from->get_value('objectClass')],
 		(map { $_ => $from->get_value($_) } grep { /^samba/ } $from->attributes),
@@ -432,8 +433,8 @@ post '/copy' => (is_xhr=>1) => sub {
 		homeDirectory => $homeDirectory,
 		accountStatus => $self->param('accountStatus'),
 		mail => $self->param('mail'),
-		localPersonID => $self->param('localPersonID'),
-		localStudentGradYr => $self->param('localStudentGradYr'),
+		localPersonID => ($self->param('localPersonID')||''),
+		localStudentGradYr => ($self->param('localStudentGradYr')||''),
 		loginShell => $self->param('loginShell'),
 		description => $self->param('description'),
 	);
