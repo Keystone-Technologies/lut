@@ -157,8 +157,27 @@ helper search => sub {
         );
         return () if $_->is_error;
         return () unless $_->entries;
-	warn 'search', Dumper({entries => scalar $search->entries});
+	warn 'search', Dumper({entries => scalar $_->entries});
         return map { {label=>($_->get_value('gecos')||$_->get_value('localPersonID')||join(' ', $_->get_value('givenName')||'',$_->get_value('sn')||'')).' ('.$_->get_value('uid').')',value=>$_->get_value('uid')} } grep { $_->get_value('uid') } $_->entries;
+};
+helper nextuid => sub {
+	my $self = shift;
+        $_ = $self->ldap->search(
+                base=>$self->config->{ldapbase},
+                filter => "objectClass=posixAccount",
+        );
+        return () if $_->is_error;
+        return () unless $_->entries;
+	warn 'nextuid', Dumper({entries => scalar $_->entries});
+	my @uids = ();
+	foreach my $uid ( map { $_->get_value('uidNumber') } $_->entries ) {
+		push @uids, $uid unless $uid < 1000 || $uid >= 65000 || grep { $_ == $uid } @uids
+	}
+	my $nextuid = 999;
+	foreach my $uid ( sort { $a <=> $b } @uids ) {
+		last if $uid != ++$nextuid;
+	}
+	return $nextuid;
 };
 helper ous => sub {
 	my $self = shift;
@@ -396,16 +415,8 @@ post '/copy' => (is_xhr=>1) => sub {
 	return $self->render(json => {response=>'err',message=>'Error!'}) unless $self->param('dn');
 	return $self->render(json => {response=>'err',message=>'User already exists!'}) if $self->find($self->param('uid'));
 	my $from = $self->finddn($self->param('dn'));
-	my @uids = ();
-	while ( my (undef,undef,$uid) = getpwent ) {
-		push @uids, $uid unless $uid < 1000 || $uid >= 65000 || grep { $_ == $uid } @uids
-	}
-	my $nextuid = 999;
-	foreach my $uid ( sort { $a <=> $b } @uids ) {
-		last if $uid != ++$nextuid;
-	}
+	my $nextuid = $self->nextuid;
 	return $self->render(json => {response=>'err',message=>'Cannot add any more users, out of UIDs!'}) if $nextuid >= 65000;
-	endpwent;
 	my $sambaSID = $from->get_value('sambaSID');
 	my $localStudentGradYr = $self->param('localStudentGradYr');
 	my $location = $self->param('location');
