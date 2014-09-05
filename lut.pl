@@ -11,6 +11,7 @@ use Net::LDAP::Entry;
 use Net::LDAP::LDIF;
 use Net::LDAP::Util qw/ldap_explode_dn escape_filter_value/;
 use Crypt::SmbHash qw(lmhash nthash);
+use DateTime;
 
 use Data::Dumper;
 
@@ -120,6 +121,7 @@ plugin 'authorization', {
 	},
 };
 
+helper today => sub { DateTime->today() };
 helper ldap => sub { return $ldap };
 helper find => sub {
 	my $self = shift;
@@ -402,10 +404,11 @@ post '/remove' => (is_xhr=>1) => sub {
         my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
         $ldif->write_entry($_->entries);
 	return $self->render(json => {response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
+	my $date = $self->today->strftime('%Y-%m-%d');
 	if ( $user->get_value('homeDirectory') && -e $user->get_value('homeDirectory') ) {
 	    $self->system("sudo", "mv", '/tmp/backup.ldif', $user->get_value('homeDirectory'));
-	    $self->system("sudo", "mkdir", "-p", '/data/deleted_users');
-	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), '/data/deleted_users');
+	    $self->system("sudo", "mkdir", "-p", "/data/deleted_users/$date");
+	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), "/data/deleted_users/$date");
 	}
 	$self->delete($dn);
 	$self->lut_error;
