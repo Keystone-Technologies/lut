@@ -398,15 +398,15 @@ post '/remove' => (is_xhr=>1) => sub {
                 base=>$dn,
                 filter=>'objectClass=*',
         );
-#        open(my $fh, ">/tmp/backup.ldif");
-#        my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
-#        $ldif->write_entry($_->entries);
-#	return $self->render(json => {response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
-#	if ( $user->get_value('homeDirectory') && -e $user->get_value('homeDirectory') ) {
-#	    $self->system("sudo", "mv", '/tmp/backup.ldif', $user->get_value('homeDirectory'));
-#	    $self->system("sudo", "mkdir", "-p", '/data/deleted_users');
-#	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), '/data/deleted_users');
-#	}
+        open(my $fh, ">/tmp/backup.ldif");
+        my $ldif = Net::LDAP::LDIF->new($fh, "w", change=>0, onerror=>'undef');
+        $ldif->write_entry($_->entries);
+	return $self->render(json => {response=>'err',message=>'Could not make backup of user\'s object'}) unless -e '/tmp/backup.ldif';
+	if ( $user->get_value('homeDirectory') && -e $user->get_value('homeDirectory') ) {
+	    $self->system("sudo", "mv", '/tmp/backup.ldif', $user->get_value('homeDirectory'));
+	    $self->system("sudo", "mkdir", "-p", '/data/deleted_users');
+	    $self->system("sudo", "mv", $user->get_value('homeDirectory'), '/data/deleted_users');
+	}
 	$self->delete($dn);
 	$self->lut_error;
 };
