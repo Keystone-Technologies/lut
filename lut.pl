@@ -23,6 +23,7 @@ use Data::Dumper;
 
 my $basename = basename $0, '.pl';
 plugin Config => {
+	file => '/etc/default/lut',
 	default => {
 		ldapbase => $ENV{LDAPBASE} || 'o=Local',
 		ldaphost => $ENV{LDAPHOST} || 'localhost',
