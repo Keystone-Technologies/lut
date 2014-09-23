@@ -23,7 +23,7 @@ use Data::Dumper;
 
 my $basename = basename $0, '.pl';
 plugin Config => {
-	file => '/etc/default/lut',
+	file => '/etc/default/lut.conf',
 	default => {
 		ldapbase => $ENV{LDAPBASE} || 'o=Local',
 		ldaphost => $ENV{LDAPHOST} || 'localhost',
@@ -53,7 +53,7 @@ $search->code && die "Cannot find base ".app->config->{ldapbase}.": ".$search->e
 #warn $entry->dn, "\n";
 app->types->type(ldif => 'application/ldif');
 
-app->config(hypnotoad => {pid_file=>"$Bin/../.$basename", listen=>[split ',', $ENV{MOJO_LISTEN}], proxy=>$ENV{MOJO_REVERSE_PROXY}});
+app->config(hypnotoad => {listen=>[split ',', $ENV{MOJO_LISTEN}], proxy=>$ENV{MOJO_REVERSE_PROXY}});
 plugin 'IsXHR';
 plugin 'authentication' => {
 	'autoload_user' => 1,
