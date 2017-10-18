@@ -1,0 +1,5 @@
+# /etc/default/lut.conf
+{
+	ldaphost => 'localhost',
+	ldapbindpw => 'bindpw',
+}

@@ -317,6 +317,7 @@ post '/details' => (is_xhr=>1) => sub {
 		accountStatus => $details->get_value('accountStatus')||'', # Note, ldapbulkacct might not create mail attr but they are required for this tool
 		mail => $details->get_value('mail')||'',
 		localPersonID => $details->get_value('localPersonID')||'',
+		localStudentGradYr => $details->get_value('localStudentGradYr')||'',
 		loginShell => $details->get_value('loginShell')||'',
 		description => $details->get_value('description')||'',
 	});
@@ -425,6 +426,20 @@ post '/copy' => (is_xhr=>1) => sub {
 	my $localStudentGradYr = $self->param('localStudentGradYr');
 	my $location = $self->param('location');
 	$location =~ s/ou=\d{4}/ou=$localStudentGradYr/ if $localStudentGradYr;
+	unless ( grep { $_->[1] eq $location } $self->ous ) {
+		warn "Add OU $location\n";
+		my $oldou = $from->dn;
+		$oldou =~ s/^[^,]+,//;
+		$oldou = $self->ldap->search(base => $oldou, filter => 'objectClass=organizationalUnit');
+		unless ( $oldou->code ) {
+			my $e = $oldou->entry(0);
+			my $oldou1 = $e->get_value('ou');
+			my $description = $e->get_value('description');
+			$oldou1 =~ s/\d{4}/$localStudentGradYr/ if $localStudentGradYr;
+			$description =~ s/\d{4}/$localStudentGradYr/ if $localStudentGradYr;
+			$self->add($location, objectClass => ['top', 'organizationalUnit'], ou => $oldou1, description => $description);
+		}
+	}
 	my $homeDirectory = $self->param('homeDirectory');
 	$homeDirectory =~ s/\b\d{4}\b/$localStudentGradYr/ if $localStudentGradYr;
 	$sambaSID =~ s/\d+$//;

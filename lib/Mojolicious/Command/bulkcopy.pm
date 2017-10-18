@@ -1,10 +1,11 @@
 package Mojolicious::Command::bulkcopy;
 use Mojo::Base 'Mojolicious::Command';
 
-has description => 'Show versions of installed modules.';
+has description => "Use a template user as a basis for creating multiple accounts\n";
 has usage => sub { shift->extract_usage };
 
 use Getopt::Long;
+use String::MkPasswd 'mkpasswd';
 
 sub run {
   my $self = shift;
@@ -40,15 +41,22 @@ sub run {
       $input{$_||'undef'} = shift @_;
     }
     my $to = $from;
-    $to->{uid} = $input{uid} || lc($input{sn}.substr($input{givenName},0,1));
-    $to->{homeDirectory} =~ s/[^\/]+$/$to->{uid}/;
+    my %from = %$from;
+    $to->{localPersonID} = $input{localPersonID} if $input{localPersonID};
+    $to->{localStudentGradYr} = $input{localStudentGradYr} if $input{localStudentGradYr};
+    $to->{location} =~ s/$from{localStudentGradYr}/$to->{localStudentGradYr}/ if $to->{localStudentGradYr};
+    $to->{uid} = $input{uid};
+    unless ( $to->{uid} ) {
+      $to->{uid} = lc($input{sn}.substr($input{givenName},0,1));
+      $to->{uid} =~ s/\W//g;
+    }
+    $to->{homeDirectory} =~ s/$from{uid}/$to->{uid}/;
+    $to->{homeDirectory} =~ s/$from{localStudentGradYr}/$to->{localStudentGradYr}/ if $to->{localStudentGradYr};
     $to->{gecos} = join ' ', $input{givenName}, $input{sn};
     $to->{sn} = $input{sn};
     $to->{givenName} = $input{givenName};
-    $to->{localPersonID} = $input{localPersonID} if $input{localPersonID};
-    $to->{localStudentGradYr} = $input{localStudentGradYr} if $input{localStudentGradYr};
-    $to->{mail} =~ s/^[^\@]+/$to->{uid}/; $to->{mail} = $input{mail} if $input{mail};
-    $to->{userPassword} = $input{userPassword};
+    $to->{mail} = ''; #~ s/$from->{uid}/$to->{uid}/; $to->{mail} = $input{mail} if $input{mail};
+    $to->{userPassword} = $input{userPassword} || mkpasswd(-length => 4, -minnum => 4, -minlower => 0, -minupper => 0, -minspecial => 0, -distribute => 1, -noambiguous => 1);
     my $copy = join '&', map { "$_=$to->{$_}" } keys %$to;
     warn "Adding $to->{uid}\n";
     warn "/home/admin/copy?$copy\n" unless $execute;
